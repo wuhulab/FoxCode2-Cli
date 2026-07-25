@@ -10,13 +10,57 @@ from rich.markdown import Markdown
 from rich.table import Table
 from rich.text import Text
 from rich import box
-from pydantic_ai.exceptions import ModelHTTPError
 
 from .config import load_config
 from .models import ActionPlan, WorkspaceDeps, UndoManager
 from .agent import create_agent
 
 console = Console()
+
+
+class RetryClient(httpx.AsyncClient):
+    RETRY_STATUSES = frozenset({403, 429, 500, 502, 503, 504})
+
+    async def send(self, request, *args, **kwargs):
+        retry_count = 0
+        body = await request.aread()
+        headers = dict(request.headers)
+        url = str(request.url)
+        method = request.method
+
+        while True:
+            try:
+                new_request = httpx.Request(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    content=body,
+                )
+                response = await super().send(new_request, *args, **kwargs)
+
+                if response.status_code in self.RETRY_STATUSES:
+                    retry_count += 1
+                    wait = min(15 * retry_count, 120)
+                    await response.aread()
+                    console.print(
+                        f"  [yellow]服务暂不可用 ({response.status_code})，{wait}秒后重试 (第{retry_count}次)[/yellow]"
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+
+                return response
+
+            except (
+                httpx.TimeoutException,
+                httpx.ConnectError,
+                httpx.RemoteProtocolError,
+            ) as e:
+                retry_count += 1
+                wait = min(15 * retry_count, 120)
+                console.print(
+                    f"  [yellow]请求异常: {e}，{wait}秒后重试 (第{retry_count}次)[/yellow]"
+                )
+                await asyncio.sleep(wait)
 
 
 def print_welcome():
@@ -110,7 +154,7 @@ async def main_async():
         if proxy_url:
             proxy_mounts[scheme] = httpx.AsyncHTTPTransport(proxy=proxy_url)
 
-    async with httpx.AsyncClient(mounts=proxy_mounts or None) as http_client:
+    async with RetryClient(mounts=proxy_mounts or None) as http_client:
         undo_manager = UndoManager()
         deps = WorkspaceDeps(
             workspace_dir=workspace_dir,
@@ -191,30 +235,11 @@ async def main_async():
 
                 update_task = asyncio.create_task(updater())
                 try:
-                    result = None
-                    retry_count = 0
-                    while True:
-                        try:
-                            result = await agent.run(
-                                prompt,
-                                message_history=all_messages,
-                                deps=deps,
-                            )
-                            break
-                        except ModelHTTPError as e:
-                            retry_count += 1
-                            wait = min(15 * retry_count, 120)
-                            console.print(
-                                f"  [yellow]服务暂不可用 ({e.status_code})，{wait}秒后重试 (第{retry_count}次)[/yellow]"
-                            )
-                            await asyncio.sleep(wait)
-                        except Exception as e:
-                            retry_count += 1
-                            wait = min(15 * retry_count, 120)
-                            console.print(
-                                f"  [yellow]请求异常: {e}，{wait}秒后重试 (第{retry_count}次)[/yellow]"
-                            )
-                            await asyncio.sleep(wait)
+                    result = await agent.run(
+                        prompt,
+                        message_history=all_messages,
+                        deps=deps,
+                    )
                 finally:
                     update_task.cancel()
                     live.stop()
