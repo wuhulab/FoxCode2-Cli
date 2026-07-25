@@ -10,6 +10,7 @@ from rich.markdown import Markdown
 from rich.table import Table
 from rich.text import Text
 from rich import box
+from pydantic_ai.exceptions import ModelHTTPError
 
 from .config import load_config
 from .models import ActionPlan, WorkspaceDeps, UndoManager
@@ -190,11 +191,30 @@ async def main_async():
 
                 update_task = asyncio.create_task(updater())
                 try:
-                    result = await agent.run(
-                        prompt,
-                        message_history=all_messages,
-                        deps=deps,
-                    )
+                    max_retries = 3
+                    last_error = None
+                    for attempt in range(1, max_retries + 1):
+                        try:
+                            result = await agent.run(
+                                prompt,
+                                message_history=all_messages,
+                                deps=deps,
+                            )
+                            break
+                        except ModelHTTPError as e:
+                            last_error = e
+                            status = e.status_code
+                            if status >= 500 and attempt < max_retries:
+                                wait = attempt * 30
+                                console.print(
+                                    f"  [yellow]服务暂不可用 ({status})，{wait}秒后重试 ({attempt}/{max_retries})[/yellow]"
+                                )
+                                await asyncio.sleep(wait)
+                                continue
+                            raise
+                    else:
+                        if last_error:
+                            raise last_error
                 finally:
                     update_task.cancel()
                     live.stop()
