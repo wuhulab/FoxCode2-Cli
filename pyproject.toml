@@ -1,0 +1,21 @@
+[project]
+name = "foxcode"
+version = "0.2.0"
+description = "AI 编码代理工具 - 智能编程助手"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic-ai>=2.18.0",
+    "httpx>=0.28.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+foxcode = "foxcode.cli:main"
