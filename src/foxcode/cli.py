@@ -114,7 +114,7 @@ async def main_async():
 
         while True:
             try:
-                prompt = console.input("[bold blue]>>[/bold blue] ").strip()
+                prompt = console.input(">> ").strip()
             except (EOFError, KeyboardInterrupt):
                 break
 
