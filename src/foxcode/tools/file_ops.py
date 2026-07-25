@@ -14,6 +14,7 @@ def register(agent):
             return f"错误: {filename} 不是一个文件"
         try:
             content = filepath.read_text(encoding="utf-8")
+            ctx.deps.tool_tracker.add_chars(len(content))
             return content
         except Exception as e:
             return f"错误: 读取文件失败 - {e}"
@@ -29,6 +30,7 @@ def register(agent):
         filepath.parent.mkdir(parents=True, exist_ok=True)
         try:
             filepath.write_text(content, encoding="utf-8")
+            ctx.deps.tool_tracker.add_chars(len(content))
             ctx.deps.undo_manager.record("create", filename)
             return f"已创建文件 {filename}"
         except Exception as e:
@@ -54,6 +56,7 @@ def register(agent):
         ctx.deps.undo_manager.record("write", filename, old_content=content)
         new_content = content.replace(old_string, new_string, 1)
         filepath.write_text(new_content, encoding="utf-8")
+        ctx.deps.tool_tracker.add_chars(len(new_content))
         return f"已更新 {filename}"
 
     @agent.tool
@@ -70,6 +73,7 @@ def register(agent):
             return f"错误: 读取文件失败 - {e}"
         ctx.deps.undo_manager.record("write", filename, old_content=old_content)
         filepath.write_text(content, encoding="utf-8")
+        ctx.deps.tool_tracker.add_chars(len(content))
         return f"已覆盖写入 {filename}"
 
     @agent.tool
@@ -87,6 +91,7 @@ def register(agent):
         ctx.deps.undo_manager.record("write", filename, old_content=old_content)
         with filepath.open("a", encoding="utf-8") as f:
             f.write(content)
+        ctx.deps.tool_tracker.add_chars(len(content))
         return f"已追加内容到 {filename}"
 
     @agent.tool

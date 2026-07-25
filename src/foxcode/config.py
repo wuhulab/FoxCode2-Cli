@@ -13,4 +13,7 @@ def load_config():
         "workspace_dir": Path(os.getenv("WORKSPACE_DIR", ".")).resolve(),
         "temperature": float(os.getenv("TEMPERATURE", "0.7")),
         "shell_timeout": int(os.getenv("SHELL_TIMEOUT", "30")),
+        "http_proxy": os.getenv("HTTP_PROXY") or os.getenv("http_proxy") or "",
+        "https_proxy": os.getenv("HTTPS_PROXY") or os.getenv("https_proxy") or "",
+        "no_proxy": os.getenv("NO_PROXY") or os.getenv("no_proxy") or "",
     }

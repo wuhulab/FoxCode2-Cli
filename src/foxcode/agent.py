@@ -3,14 +3,18 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.settings import ModelSettings
 from .models import ActionPlan, WorkspaceDeps
+import httpx
 
 
-def create_agent(config: dict) -> Agent[WorkspaceDeps, ActionPlan]:
+def create_agent(
+    config: dict, http_client: httpx.AsyncClient | None = None
+) -> Agent[WorkspaceDeps, ActionPlan]:
     model = OpenAIChatModel(
         config["model"],
         provider=OpenAIProvider(
             base_url=config["base_url"],
             api_key=config["api_key"],
+            http_client=http_client,
         ),
     )
 

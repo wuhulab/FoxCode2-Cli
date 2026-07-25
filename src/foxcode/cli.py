@@ -2,11 +2,13 @@ import asyncio
 import sys
 from pathlib import Path
 import httpx
+from httpx import AsyncHTTPTransport
 from rich.console import Console
-from rich.prompt import Prompt
+from rich.live import Live
 from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.table import Table
+from rich.text import Text
 from rich import box
 
 from .config import load_config
@@ -99,7 +101,15 @@ async def main_async():
     console.print(f"[dim]模型: {config['model']}[/dim]")
     console.print()
 
-    async with httpx.AsyncClient() as http_client:
+    proxy_mounts = {}
+    for scheme, proxy_url in [
+        ("http://", config["http_proxy"]),
+        ("https://", config["https_proxy"]),
+    ]:
+        if proxy_url:
+            proxy_mounts[scheme] = httpx.AsyncHTTPTransport(proxy=proxy_url)
+
+    async with httpx.AsyncClient(mounts=proxy_mounts or None) as http_client:
         undo_manager = UndoManager()
         deps = WorkspaceDeps(
             workspace_dir=workspace_dir,
@@ -108,7 +118,7 @@ async def main_async():
             console=console,
             shell_timeout=config["shell_timeout"],
         )
-        agent = create_agent(config)
+        agent = create_agent(config, http_client)
 
         all_messages = []
 
@@ -151,13 +161,45 @@ async def main_async():
             try:
                 deps.tool_tracker.reset()
                 console.print("[dim]────────────────────────────────────────[/dim]")
-                result = await agent.run(
-                    prompt,
-                    message_history=all_messages,
-                    deps=deps,
-                )
-                all_messages = result.all_messages()
 
+                spinner_chars = "-/\\-"
+                frame = 0
+
+                status_text = Text("")
+                live = Live(
+                    status_text,
+                    refresh_per_second=10,
+                    console=console,
+                    transient=True,
+                )
+                live.start()
+
+                async def updater():
+                    nonlocal frame
+                    try:
+                        while True:
+                            sp = spinner_chars[frame % len(spinner_chars)]
+                            frame += 1
+                            line = deps.tool_tracker.status_line(sp)
+                            t = Text(line)
+                            t.stylize("bold cyan")
+                            live.update(t)
+                            await asyncio.sleep(0.1)
+                    except asyncio.CancelledError:
+                        pass
+
+                update_task = asyncio.create_task(updater())
+                try:
+                    result = await agent.run(
+                        prompt,
+                        message_history=all_messages,
+                        deps=deps,
+                    )
+                finally:
+                    update_task.cancel()
+                    live.stop()
+
+                all_messages = result.all_messages()
                 plan = result.output
 
                 summary = deps.tool_tracker.summary_str()

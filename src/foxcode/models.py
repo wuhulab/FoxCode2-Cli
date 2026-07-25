@@ -7,6 +7,49 @@ import httpx
 from rich.console import Console
 
 
+STATUS_NAMES = {
+    "read_file": "读取中",
+    "create_file": "创建中",
+    "write_file": "编辑中",
+    "write_file_complete": "写入中",
+    "append_file": "追加中",
+    "delete_file": "删除中",
+    "rename_file": "重命名中",
+    "list_files": "探索中",
+    "web_search": "搜索中",
+    "run_shell": "执行中",
+    "run_file": "运行中",
+}
+
+COUNT_LABELS = {
+    "read_file": ("读取", "read"),
+    "write_file": ("编辑", "edit"),
+    "write_file_complete": ("覆盖", "overwrite"),
+    "create_file": ("创建", "create"),
+    "delete_file": ("删除", "delete"),
+    "rename_file": ("重命名", "rename"),
+    "append_file": ("追加", "append"),
+    "list_files": ("列出", "list"),
+    "web_search": ("搜索", "search"),
+    "run_shell": ("命令", "shell"),
+    "run_file": ("运行", "run"),
+}
+
+ICONS = {
+    "read_file": "📖",
+    "create_file": "📄",
+    "write_file": "✏️",
+    "write_file_complete": "📝",
+    "append_file": "➕",
+    "delete_file": "🗑️",
+    "rename_file": "🔀",
+    "list_files": "📂",
+    "web_search": "🔍",
+    "run_shell": "⚡",
+    "run_file": "▶️",
+}
+
+
 class ActionPlan(BaseModel):
     explanation: str
     files_modified: list[str] = []
@@ -88,16 +131,34 @@ class UndoManager:
 @dataclass
 class ToolTracker:
     _counts: Counter = field(default_factory=Counter)
+    _current_tool: str = ""
+    _total_chars: int = 0
+    max_tokens: int = 128000
 
     def reset(self):
         self._counts.clear()
+        self._current_tool = ""
+        self._total_chars = 0
 
-    def count(self, tool_name: str):
+    def count(self, tool_name: str, chars: int = 0):
         self._counts[tool_name] += 1
+        self._current_tool = tool_name
+        self._total_chars += chars
+
+    def add_chars(self, n: int):
+        self._total_chars += n
+
+    @property
+    def current_tool(self) -> str:
+        return self._current_tool
 
     @property
     def total(self) -> int:
         return sum(self._counts.values())
+
+    @property
+    def estimated_tokens(self) -> int:
+        return self._total_chars // 4
 
     def summary(self) -> dict[str, int]:
         return dict(self._counts)
@@ -105,24 +166,27 @@ class ToolTracker:
     def summary_str(self, lang: str = "zh") -> str:
         if not self._counts:
             return ""
-        words_map = {
-            "read_file": ("读取", "read"),
-            "write_file": ("编辑", "edit"),
-            "write_file_complete": ("覆盖", "overwrite"),
-            "create_file": ("创建", "create"),
-            "delete_file": ("删除", "delete"),
-            "rename_file": ("重命名", "rename"),
-            "append_file": ("追加", "append"),
-            "list_files": ("列出", "list"),
-            "web_search": ("搜索", "search"),
-            "run_shell": ("命令", "shell"),
-            "run_file": ("运行", "run"),
-        }
         parts = []
         for name, count in sorted(self._counts.items()):
-            label = words_map.get(name, (name, name))[0 if lang == "zh" else 1]
+            label = COUNT_LABELS.get(name, (name, name))[0 if lang == "zh" else 1]
             parts.append(f"{count}次{label}")
         return "，".join(parts) if parts else ""
+
+    def status_line(self, spinner: str, lang: str = "zh") -> str:
+        status = STATUS_NAMES.get(self._current_tool, "处理中")
+        icon = ICONS.get(self._current_tool, "⚙️")
+        parts = [f"{spinner} {icon} {status}"]
+
+        summary = self.summary_str(lang)
+        if summary:
+            parts.append(f"调用 {summary}")
+
+        tokens = self.estimated_tokens
+        if tokens > 500:
+            pct = min(tokens * 100 // self.max_tokens, 99)
+            parts.append(f"{tokens / 1000:.1f}k({pct}%) token")
+
+        return "  ".join(parts)
 
 
 @dataclass
