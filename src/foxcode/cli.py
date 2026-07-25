@@ -191,9 +191,9 @@ async def main_async():
 
                 update_task = asyncio.create_task(updater())
                 try:
-                    max_retries = 3
-                    last_error = None
-                    for attempt in range(1, max_retries + 1):
+                    result = None
+                    retry_count = 0
+                    while True:
                         try:
                             result = await agent.run(
                                 prompt,
@@ -202,19 +202,19 @@ async def main_async():
                             )
                             break
                         except ModelHTTPError as e:
-                            last_error = e
-                            status = e.status_code
-                            if status >= 500 and attempt < max_retries:
-                                wait = attempt * 30
-                                console.print(
-                                    f"  [yellow]服务暂不可用 ({status})，{wait}秒后重试 ({attempt}/{max_retries})[/yellow]"
-                                )
-                                await asyncio.sleep(wait)
-                                continue
-                            raise
-                    else:
-                        if last_error:
-                            raise last_error
+                            retry_count += 1
+                            wait = min(15 * retry_count, 120)
+                            console.print(
+                                f"  [yellow]服务暂不可用 ({e.status_code})，{wait}秒后重试 (第{retry_count}次)[/yellow]"
+                            )
+                            await asyncio.sleep(wait)
+                        except Exception as e:
+                            retry_count += 1
+                            wait = min(15 * retry_count, 120)
+                            console.print(
+                                f"  [yellow]请求异常: {e}，{wait}秒后重试 (第{retry_count}次)[/yellow]"
+                            )
+                            await asyncio.sleep(wait)
                 finally:
                     update_task.cancel()
                     live.stop()
