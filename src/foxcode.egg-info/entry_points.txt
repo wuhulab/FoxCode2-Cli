@@ -1,0 +1,3 @@
+[console_scripts]
+fc = foxcode.cli:main
+foxcode = foxcode.cli:main

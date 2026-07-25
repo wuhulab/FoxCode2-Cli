@@ -3,6 +3,7 @@ import html
 from urllib.parse import quote_plus
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
+from . import log_tool
 
 
 def register(agent):
@@ -10,6 +11,7 @@ def register(agent):
     async def web_search(
         ctx: RunContext[WorkspaceDeps], query: str, num_results: int = 5
     ) -> str:
+        log_tool(ctx, "web_search", f'"{query}"')
         if num_results < 1:
             num_results = 1
         if num_results > 15:

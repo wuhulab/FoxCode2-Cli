@@ -18,8 +18,7 @@ console = Console()
 
 def print_welcome():
     title = Panel.fit(
-        "[bold cyan]FoxCode AI 编程助手[/bold cyan] v0.2.0\n"
-        "[dim]输入编程需求，AI 将帮助你完成[/dim]\n\n"
+        "[bold cyan]FoxCode Cli[/bold cyan] v1.0.0\n"
         "[yellow]/help[/yellow] 查看命令  "
         "[yellow]/undo[/yellow] 撤销操作  "
         "[yellow]/history[/yellow] 操作历史  "
@@ -106,6 +105,7 @@ async def main_async():
             workspace_dir=workspace_dir,
             http_client=http_client,
             undo_manager=undo_manager,
+            console=console,
             shell_timeout=config["shell_timeout"],
         )
         agent = create_agent(config)
@@ -114,9 +114,8 @@ async def main_async():
 
         while True:
             try:
-                prompt = Prompt.ask("[bold blue]你[/bold blue]")
+                prompt = console.input("[bold blue]>>[/bold blue] ").strip()
             except (EOFError, KeyboardInterrupt):
-                console.print("\n[yellow]再见![/yellow]")
                 break
 
             if not prompt.strip():
@@ -125,7 +124,6 @@ async def main_async():
             if prompt.startswith("/"):
                 cmd = prompt.strip().lower()
                 if cmd in ("/exit", "/quit"):
-                    console.print("[yellow]再见![/yellow]")
                     break
                 elif cmd == "/help":
                     print_help()
@@ -151,15 +149,21 @@ async def main_async():
                     continue
 
             try:
-                with console.status("[bold yellow]思考中...", spinner="dots"):
-                    result = await agent.run(
-                        prompt,
-                        message_history=all_messages,
-                        deps=deps,
-                    )
-                    all_messages = result.all_messages()
+                deps.tool_tracker.reset()
+                console.print("[dim]────────────────────────────────────────[/dim]")
+                result = await agent.run(
+                    prompt,
+                    message_history=all_messages,
+                    deps=deps,
+                )
+                all_messages = result.all_messages()
 
                 plan = result.output
+
+                summary = deps.tool_tracker.summary_str()
+                if summary:
+                    console.print(f"  [bold cyan]工具调用: {summary}[/bold cyan]")
+
                 print_action_plan(plan)
 
             except Exception as e:
@@ -173,7 +177,6 @@ def main():
     try:
         asyncio.run(main_async())
     except KeyboardInterrupt:
-        console.print("\n[yellow]再见![/yellow]")
         sys.exit(0)
 
 

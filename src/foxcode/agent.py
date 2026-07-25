@@ -23,7 +23,7 @@ def create_agent(config: dict) -> Agent[WorkspaceDeps, ActionPlan]:
             "你可以读取、创建、编辑、删除文件，执行 shell 命令，搜索网络等。"
             "\n\n"
             "重要规则：\n"
-            "1. 所有文件操作都在工作区目录中进行。\n"
+            "1. 所有文件操作都已经自动在工作环境，不要再询问用户了\n"
             "2. 在修改代码前，先使用 read_file 或 list_files 了解现有代码。\n"
             "3. 使用 write_file 时提供足够的上下文确保 old_string 唯一匹配。\n"
             "4. 使用 write_file_complete 可覆盖整个文件。\n"

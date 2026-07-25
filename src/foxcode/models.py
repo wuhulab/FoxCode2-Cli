@@ -1,8 +1,10 @@
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 from pydantic import BaseModel
 import httpx
+from rich.console import Console
 
 
 class ActionPlan(BaseModel):
@@ -84,8 +86,50 @@ class UndoManager:
 
 
 @dataclass
+class ToolTracker:
+    _counts: Counter = field(default_factory=Counter)
+
+    def reset(self):
+        self._counts.clear()
+
+    def count(self, tool_name: str):
+        self._counts[tool_name] += 1
+
+    @property
+    def total(self) -> int:
+        return sum(self._counts.values())
+
+    def summary(self) -> dict[str, int]:
+        return dict(self._counts)
+
+    def summary_str(self, lang: str = "zh") -> str:
+        if not self._counts:
+            return ""
+        words_map = {
+            "read_file": ("读取", "read"),
+            "write_file": ("编辑", "edit"),
+            "write_file_complete": ("覆盖", "overwrite"),
+            "create_file": ("创建", "create"),
+            "delete_file": ("删除", "delete"),
+            "rename_file": ("重命名", "rename"),
+            "append_file": ("追加", "append"),
+            "list_files": ("列出", "list"),
+            "web_search": ("搜索", "search"),
+            "run_shell": ("命令", "shell"),
+            "run_file": ("运行", "run"),
+        }
+        parts = []
+        for name, count in sorted(self._counts.items()):
+            label = words_map.get(name, (name, name))[0 if lang == "zh" else 1]
+            parts.append(f"{count}次{label}")
+        return "，".join(parts) if parts else ""
+
+
+@dataclass
 class WorkspaceDeps:
     workspace_dir: Path
     http_client: httpx.AsyncClient
     undo_manager: UndoManager
+    console: Console = Console()
+    tool_tracker: ToolTracker = field(default_factory=ToolTracker)
     shell_timeout: int = 30

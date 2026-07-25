@@ -2,11 +2,14 @@ import subprocess
 import sys
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
+from . import log_tool
 
 
 def register(agent):
     @agent.tool
     async def run_shell(ctx: RunContext[WorkspaceDeps], command: str) -> str:
+        cmd_preview = command[:60] + "..." if len(command) > 60 else command
+        log_tool(ctx, "run_shell", cmd_preview)
         filepath = ctx.deps.workspace_dir
         try:
             result = subprocess.run(
@@ -34,6 +37,7 @@ def register(agent):
 
     @agent.tool
     async def run_file(ctx: RunContext[WorkspaceDeps], filename: str) -> str:
+        log_tool(ctx, "run_file", filename)
         filepath = ctx.deps.workspace_dir / filename
         if not filepath.exists():
             return f"错误: 文件 {filename} 不存在"

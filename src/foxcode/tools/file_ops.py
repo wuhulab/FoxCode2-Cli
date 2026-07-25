@@ -1,10 +1,12 @@
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
+from . import log_tool
 
 
 def register(agent):
     @agent.tool
     async def read_file(ctx: RunContext[WorkspaceDeps], filename: str) -> str:
+        log_tool(ctx, "read_file", filename)
         filepath = ctx.deps.workspace_dir / filename
         if not filepath.exists():
             return f"错误: 文件 {filename} 不存在"
@@ -20,6 +22,7 @@ def register(agent):
     async def create_file(
         ctx: RunContext[WorkspaceDeps], filename: str, content: str
     ) -> str:
+        log_tool(ctx, "create_file", filename)
         filepath = ctx.deps.workspace_dir / filename
         if filepath.exists():
             return f"错误: 文件 {filename} 已存在"
@@ -35,6 +38,7 @@ def register(agent):
     async def write_file(
         ctx: RunContext[WorkspaceDeps], filename: str, old_string: str, new_string: str
     ) -> str:
+        log_tool(ctx, "write_file", filename)
         filepath = ctx.deps.workspace_dir / filename
         if not filepath.exists():
             return f"错误: 文件 {filename} 不存在"
@@ -56,6 +60,7 @@ def register(agent):
     async def write_file_complete(
         ctx: RunContext[WorkspaceDeps], filename: str, content: str
     ) -> str:
+        log_tool(ctx, "write_file_complete", filename)
         filepath = ctx.deps.workspace_dir / filename
         if not filepath.exists():
             return f"错误: 文件 {filename} 不存在，请使用 create_file 创建新文件"
@@ -71,6 +76,7 @@ def register(agent):
     async def append_file(
         ctx: RunContext[WorkspaceDeps], filename: str, content: str
     ) -> str:
+        log_tool(ctx, "append_file", filename)
         filepath = ctx.deps.workspace_dir / filename
         if not filepath.exists():
             return f"错误: 文件 {filename} 不存在"
@@ -85,6 +91,7 @@ def register(agent):
 
     @agent.tool
     async def delete_file(ctx: RunContext[WorkspaceDeps], filename: str) -> str:
+        log_tool(ctx, "delete_file", filename)
         filepath = ctx.deps.workspace_dir / filename
         if not filepath.exists():
             return f"错误: 文件 {filename} 不存在"
@@ -102,6 +109,7 @@ def register(agent):
     async def rename_file(
         ctx: RunContext[WorkspaceDeps], old_filename: str, new_filename: str
     ) -> str:
+        log_tool(ctx, "rename_file", f"{old_filename} -> {new_filename}")
         old_path = ctx.deps.workspace_dir / old_filename
         new_path = ctx.deps.workspace_dir / new_filename
         if not old_path.exists():
@@ -114,6 +122,7 @@ def register(agent):
 
     @agent.tool
     async def list_files(ctx: RunContext[WorkspaceDeps], path: str = "") -> str:
+        log_tool(ctx, "list_files", path or ".")
         search_path = ctx.deps.workspace_dir / path if path else ctx.deps.workspace_dir
         if not search_path.exists():
             return f"错误: 路径 {path} 不存在"

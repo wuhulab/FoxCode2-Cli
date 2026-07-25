@@ -19,3 +19,4 @@ where = ["src"]
 
 [project.scripts]
 foxcode = "foxcode.cli:main"
+fc = "foxcode.cli:main"
