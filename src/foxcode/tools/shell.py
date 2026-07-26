@@ -17,6 +17,8 @@ def register(agent):
                 shell=True,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=ctx.deps.shell_timeout,
                 cwd=str(filepath),
             )
@@ -61,6 +63,8 @@ def register(agent):
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=ctx.deps.shell_timeout,
                 cwd=str(ctx.deps.workspace_dir),
             )
