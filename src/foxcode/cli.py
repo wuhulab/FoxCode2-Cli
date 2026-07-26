@@ -50,11 +50,7 @@ class RetryClient(httpx.AsyncClient):
 
                 return response
 
-            except (
-                httpx.TimeoutException,
-                httpx.ConnectError,
-                httpx.RemoteProtocolError,
-            ) as e:
+            except httpx.TransportError as e:
                 retry_count += 1
                 wait = min(15 * retry_count, 120)
                 console.print(
@@ -120,12 +116,12 @@ def print_action_plan(plan: ActionPlan):
     console.print()
 
 
-async def run_undo(deps: WorkspaceDeps, steps: int = 1):
+def run_undo(deps: WorkspaceDeps, steps: int = 1):
     result = deps.undo_manager.undo(deps.workspace_dir, steps)
     console.print(f"[yellow]撤销结果:[/yellow]\n{result}")
 
 
-async def show_history(deps: WorkspaceDeps):
+def show_history(deps: WorkspaceDeps):
     result = deps.undo_manager.history_summary()
     console.print(f"[cyan]{result}[/cyan]")
 
@@ -147,6 +143,16 @@ async def main_async():
     console.print()
 
     proxy_mounts = {}
+    if config["no_proxy"]:
+        for host in config["no_proxy"].split(","):
+            host = host.strip().lower()
+            if not host:
+                continue
+            if host.startswith("."):
+                proxy_mounts[f"all://*{host}"] = httpx.AsyncHTTPTransport()
+            else:
+                proxy_mounts[f"all://{host}"] = httpx.AsyncHTTPTransport()
+
     for scheme, proxy_url in [
         ("http://", config["http_proxy"]),
         ("https://", config["https_proxy"]),
@@ -173,7 +179,7 @@ async def main_async():
             except (EOFError, KeyboardInterrupt):
                 break
 
-            if not prompt.strip():
+            if not prompt:
                 continue
 
             if prompt.startswith("/"):
@@ -188,14 +194,14 @@ async def main_async():
                     print_welcome()
                     continue
                 elif cmd == "/history":
-                    await show_history(deps)
+                    show_history(deps)
                     continue
                 elif cmd.startswith("/undo"):
                     parts = cmd.split()
                     steps = 1
                     if len(parts) > 1 and parts[1].isdigit():
                         steps = int(parts[1])
-                    await run_undo(deps, steps)
+                    run_undo(deps, steps)
                     continue
                 else:
                     console.print(

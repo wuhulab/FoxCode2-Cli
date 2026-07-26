@@ -1,13 +1,24 @@
+from pathlib import Path
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
 from . import log_tool
+
+
+def _resolve_safe_path(workspace_dir: Path, filename: str) -> Path:
+    resolved = (workspace_dir / filename).resolve()
+    if not str(resolved).startswith(str(workspace_dir.resolve())):
+        raise ValueError(f"路径越权: {filename} 不在工作区内")
+    return resolved
 
 
 def register(agent):
     @agent.tool
     async def read_file(ctx: RunContext[WorkspaceDeps], filename: str) -> str:
         log_tool(ctx, "read_file", filename)
-        filepath = ctx.deps.workspace_dir / filename
+        try:
+            filepath = _resolve_safe_path(ctx.deps.workspace_dir, filename)
+        except ValueError as e:
+            return f"错误: {e}"
         if not filepath.exists():
             return f"错误: 文件 {filename} 不存在"
         if not filepath.is_file():
@@ -24,7 +35,10 @@ def register(agent):
         ctx: RunContext[WorkspaceDeps], filename: str, content: str
     ) -> str:
         log_tool(ctx, "create_file", filename)
-        filepath = ctx.deps.workspace_dir / filename
+        try:
+            filepath = _resolve_safe_path(ctx.deps.workspace_dir, filename)
+        except ValueError as e:
+            return f"错误: {e}"
         if filepath.exists():
             return f"错误: 文件 {filename} 已存在"
         filepath.parent.mkdir(parents=True, exist_ok=True)
@@ -41,7 +55,10 @@ def register(agent):
         ctx: RunContext[WorkspaceDeps], filename: str, old_string: str, new_string: str
     ) -> str:
         log_tool(ctx, "write_file", filename)
-        filepath = ctx.deps.workspace_dir / filename
+        try:
+            filepath = _resolve_safe_path(ctx.deps.workspace_dir, filename)
+        except ValueError as e:
+            return f"错误: {e}"
         if not filepath.exists():
             return f"错误: 文件 {filename} 不存在"
         try:
@@ -64,7 +81,10 @@ def register(agent):
         ctx: RunContext[WorkspaceDeps], filename: str, content: str
     ) -> str:
         log_tool(ctx, "write_file_complete", filename)
-        filepath = ctx.deps.workspace_dir / filename
+        try:
+            filepath = _resolve_safe_path(ctx.deps.workspace_dir, filename)
+        except ValueError as e:
+            return f"错误: {e}"
         if not filepath.exists():
             return f"错误: 文件 {filename} 不存在，请使用 create_file 创建新文件"
         try:
@@ -81,14 +101,17 @@ def register(agent):
         ctx: RunContext[WorkspaceDeps], filename: str, content: str
     ) -> str:
         log_tool(ctx, "append_file", filename)
-        filepath = ctx.deps.workspace_dir / filename
+        try:
+            filepath = _resolve_safe_path(ctx.deps.workspace_dir, filename)
+        except ValueError as e:
+            return f"错误: {e}"
         if not filepath.exists():
             return f"错误: 文件 {filename} 不存在"
         try:
             old_content = filepath.read_text(encoding="utf-8")
         except Exception as e:
             return f"错误: 读取文件失败 - {e}"
-        ctx.deps.undo_manager.record("write", filename, old_content=old_content)
+        ctx.deps.undo_manager.record("append", filename, old_content=old_content)
         with filepath.open("a", encoding="utf-8") as f:
             f.write(content)
         ctx.deps.tool_tracker.add_chars(len(content))
@@ -97,7 +120,10 @@ def register(agent):
     @agent.tool
     async def delete_file(ctx: RunContext[WorkspaceDeps], filename: str) -> str:
         log_tool(ctx, "delete_file", filename)
-        filepath = ctx.deps.workspace_dir / filename
+        try:
+            filepath = _resolve_safe_path(ctx.deps.workspace_dir, filename)
+        except ValueError as e:
+            return f"错误: {e}"
         if not filepath.exists():
             return f"错误: 文件 {filename} 不存在"
         if not filepath.is_file():
@@ -115,8 +141,11 @@ def register(agent):
         ctx: RunContext[WorkspaceDeps], old_filename: str, new_filename: str
     ) -> str:
         log_tool(ctx, "rename_file", f"{old_filename} -> {new_filename}")
-        old_path = ctx.deps.workspace_dir / old_filename
-        new_path = ctx.deps.workspace_dir / new_filename
+        try:
+            old_path = _resolve_safe_path(ctx.deps.workspace_dir, old_filename)
+            new_path = _resolve_safe_path(ctx.deps.workspace_dir, new_filename)
+        except ValueError as e:
+            return f"错误: {e}"
         if not old_path.exists():
             return f"错误: 文件 {old_filename} 不存在"
         if new_path.exists():
@@ -128,7 +157,14 @@ def register(agent):
     @agent.tool
     async def list_files(ctx: RunContext[WorkspaceDeps], path: str = "") -> str:
         log_tool(ctx, "list_files", path or ".")
-        search_path = ctx.deps.workspace_dir / path if path else ctx.deps.workspace_dir
+        try:
+            search_path = (
+                _resolve_safe_path(ctx.deps.workspace_dir, path)
+                if path
+                else ctx.deps.workspace_dir
+            )
+        except ValueError as e:
+            return f"错误: {e}"
         if not search_path.exists():
             return f"错误: 路径 {path} 不存在"
         if not search_path.is_dir():
@@ -136,11 +172,20 @@ def register(agent):
         lines = []
         try:
             for entry in sorted(search_path.rglob("*")):
+                if any(
+                    p.startswith(".")
+                    for p in entry.relative_to(search_path).parts[:-1]
+                    if p != "."
+                ):
+                    continue
                 rel_path = entry.relative_to(ctx.deps.workspace_dir)
                 if entry.is_dir():
                     lines.append(f"{'/' + str(rel_path)}/")
                 else:
-                    size = entry.stat().st_size
+                    try:
+                        size = entry.stat().st_size
+                    except OSError:
+                        size = 0
                     lines.append(f"{'/' + str(rel_path)} ({size} bytes)")
         except Exception as e:
             return f"错误: 列出文件失败 - {e}"

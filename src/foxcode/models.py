@@ -103,6 +103,9 @@ class UndoManager:
                 elif entry.operation == "write":
                     full_path.write_text(entry.old_content or "", encoding="utf-8")
                     results.append(f"撤销修改: {entry.file_path}")
+                elif entry.operation == "append":
+                    full_path.write_text(entry.old_content or "", encoding="utf-8")
+                    results.append(f"撤销追加: {entry.file_path}")
                 elif entry.operation == "rename":
                     src = workspace_dir / entry.old_content
                     dst = workspace_dir / entry.file_path
