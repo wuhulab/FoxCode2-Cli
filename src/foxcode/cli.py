@@ -3,6 +3,11 @@ import sys
 from pathlib import Path
 import httpx
 from httpx import AsyncHTTPTransport
+from pydantic_ai.exceptions import (
+    UnexpectedModelBehavior,
+    ModelHTTPError,
+    ModelAPIError,
+)
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
@@ -44,10 +49,6 @@ class RetryClient(httpx.AsyncClient):
                     wait = min(15 * retry_count, 120)
                     await response.aread()
                     if retry_count > self.MAX_RETRIES:
-                        await response.aread()
-                        console.print(
-                            f"  [red]服务不可用 ({response.status_code})，已达最大重试次数 {self.MAX_RETRIES}[/red]"
-                        )
                         raise httpx.HTTPStatusError(
                             f"服务不可用 ({response.status_code})，已达最大重试次数",
                             request=new_request,
@@ -58,6 +59,18 @@ class RetryClient(httpx.AsyncClient):
                     )
                     await asyncio.sleep(wait)
                     continue
+
+                if response.is_error:
+                    await response.aread()
+                    try:
+                        detail = response.text[:300] if response.text else ""
+                    except Exception:
+                        detail = ""
+                    raise httpx.HTTPStatusError(
+                        f"API 请求失败 ({response.status_code}): {detail}",
+                        request=new_request,
+                        response=response,
+                    )
 
                 return response
 
@@ -284,6 +297,30 @@ async def main_async():
 
                 print_action_plan(plan)
 
+            except UnexpectedModelBehavior as e:
+                console.print(f"[red]API 响应格式错误: {e}[/red]")
+                console.print(
+                    "  [yellow]该模型可能不完全兼容 OpenAI 格式。"
+                    "请检查 API 地址、密钥是否正确，或尝试其他模型[/yellow]"
+                )
+            except ModelHTTPError as e:
+                detail = ""
+                if e.body:
+                    detail = str(e.body)[:300]
+                console.print(
+                    f"[red]API HTTP 错误 ({e.status_code}) 模型={e.model_name}: {detail}[/red]"
+                )
+            except ModelAPIError as e:
+                detail = str(e)
+                seen = {detail}
+                cause = e.__cause__
+                while cause:
+                    cause_str = str(cause)
+                    if cause_str not in seen:
+                        detail += f" -> {cause_str}"
+                        seen.add(cause_str)
+                    cause = cause.__cause__
+                console.print(f"[red]API 错误: {detail}[/red]")
             except Exception as e:
                 console.print(f"[red]错误: {e}[/red]")
                 import traceback
