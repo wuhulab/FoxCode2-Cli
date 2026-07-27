@@ -61,7 +61,6 @@ class UndoEntry:
     operation: str
     file_path: str
     old_content: Optional[str] = None
-    new_content: Optional[str] = None
 
 
 class UndoManager:
@@ -73,14 +72,12 @@ class UndoManager:
         operation: str,
         file_path: str,
         old_content: Optional[str] = None,
-        new_content: Optional[str] = None,
     ):
         self._history.append(
             UndoEntry(
                 operation=operation,
                 file_path=file_path,
                 old_content=old_content,
-                new_content=new_content,
             )
         )
 
@@ -102,12 +99,15 @@ class UndoManager:
                     results.append(f"撤销删除: {entry.file_path}")
                 elif entry.operation == "write":
                     full_path.write_text(entry.old_content or "", encoding="utf-8")
-                    results.append(f"撤销修改: {entry.file_path}")
+                    results.append(f"撤销编辑: {entry.file_path}")
+                elif entry.operation == "overwrite":
+                    full_path.write_text(entry.old_content or "", encoding="utf-8")
+                    results.append(f"撤销覆盖: {entry.file_path}")
                 elif entry.operation == "append":
                     full_path.write_text(entry.old_content or "", encoding="utf-8")
                     results.append(f"撤销追加: {entry.file_path}")
                 elif entry.operation == "rename":
-                    src = workspace_dir / entry.old_content
+                    src = workspace_dir / (entry.old_content or "")
                     dst = workspace_dir / entry.file_path
                     if dst.exists():
                         dst.rename(src)
@@ -115,7 +115,9 @@ class UndoManager:
                         f"撤销重命名: {entry.file_path} -> {entry.old_content}"
                     )
             except Exception as e:
+                self._history.append(entry)
                 results.append(f"撤销失败 ({entry.file_path}): {e}")
+                break
         return "\n".join(results) if results else "没有可撤销的操作"
 
     @property
@@ -187,7 +189,10 @@ class ToolTracker:
         tokens = self.estimated_tokens
         if tokens > 500:
             pct = min(tokens * 100 // self.max_tokens, 99)
-            parts.append(f"{tokens / 1000:.1f}k({pct}%) token")
+            if pct > 0:
+                parts.append(f"{tokens / 1000:.1f}k({pct}%) token")
+            else:
+                parts.append(f"{tokens / 1000:.1f}k token")
 
         return "  ".join(parts)
 

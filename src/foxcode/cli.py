@@ -20,6 +20,7 @@ console = Console()
 
 class RetryClient(httpx.AsyncClient):
     RETRY_STATUSES = frozenset({403, 429, 500, 502, 503, 504})
+    MAX_RETRIES = 5
 
     async def send(self, request, *args, **kwargs):
         retry_count = 0
@@ -42,6 +43,16 @@ class RetryClient(httpx.AsyncClient):
                     retry_count += 1
                     wait = min(15 * retry_count, 120)
                     await response.aread()
+                    if retry_count > self.MAX_RETRIES:
+                        await response.aread()
+                        console.print(
+                            f"  [red]服务不可用 ({response.status_code})，已达最大重试次数 {self.MAX_RETRIES}[/red]"
+                        )
+                        raise httpx.HTTPStatusError(
+                            f"服务不可用 ({response.status_code})，已达最大重试次数",
+                            request=new_request,
+                            response=response,
+                        )
                     console.print(
                         f"  [yellow]服务暂不可用 ({response.status_code})，{wait}秒后重试 (第{retry_count}次)[/yellow]"
                     )
@@ -52,6 +63,11 @@ class RetryClient(httpx.AsyncClient):
 
             except httpx.TransportError as e:
                 retry_count += 1
+                if retry_count > self.MAX_RETRIES:
+                    console.print(
+                        f"  [red]请求异常: {e}，已达最大重试次数 {self.MAX_RETRIES}[/red]"
+                    )
+                    raise
                 wait = min(15 * retry_count, 120)
                 console.print(
                     f"  [yellow]请求异常: {e}，{wait}秒后重试 (第{retry_count}次)[/yellow]"
@@ -61,7 +77,7 @@ class RetryClient(httpx.AsyncClient):
 
 def print_welcome():
     title = Panel.fit(
-        "[bold cyan]FoxCode Cli[/bold cyan] v1.0.0\n"
+        "[bold cyan]FoxCode Cli[/bold cyan] v0.2.0\n"
         "[yellow]/help[/yellow] 查看命令  "
         "[yellow]/undo[/yellow] 撤销操作  "
         "[yellow]/history[/yellow] 操作历史  "
@@ -138,6 +154,9 @@ async def main_async():
         sys.exit(1)
 
     workspace_dir.mkdir(parents=True, exist_ok=True)
+    if not workspace_dir.is_dir():
+        console.print(f"[red]错误: 工作目录路径存在但不是目录: {workspace_dir}[/red]")
+        sys.exit(1)
     console.print(f"[dim]工作目录: {workspace_dir}[/dim]")
     console.print(f"[dim]模型: {config['model']}[/dim]")
     console.print()
@@ -172,6 +191,7 @@ async def main_async():
         agent = create_agent(config, http_client)
 
         all_messages = []
+        max_history_messages = 50
 
         while True:
             try:
@@ -238,6 +258,8 @@ async def main_async():
                             await asyncio.sleep(0.1)
                     except asyncio.CancelledError:
                         pass
+                    except Exception:
+                        pass
 
                 update_task = asyncio.create_task(updater())
                 try:
@@ -251,6 +273,9 @@ async def main_async():
                     live.stop()
 
                 all_messages = result.all_messages()
+                if len(all_messages) > max_history_messages:
+                    cutoff = len(all_messages) - max_history_messages
+                    all_messages = all_messages[cutoff:]
                 plan = result.output
 
                 summary = deps.tool_tracker.summary_str()

@@ -2,6 +2,7 @@ import subprocess
 import sys
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
+from ..tools.file_ops import _resolve_safe_path
 from . import log_tool
 
 
@@ -40,7 +41,10 @@ def register(agent):
     @agent.tool
     async def run_file(ctx: RunContext[WorkspaceDeps], filename: str) -> str:
         log_tool(ctx, "run_file", filename)
-        filepath = ctx.deps.workspace_dir / filename
+        try:
+            filepath = _resolve_safe_path(ctx.deps.workspace_dir, filename)
+        except ValueError as e:
+            return f"错误: {e}"
         if not filepath.exists():
             return f"错误: 文件 {filename} 不存在"
         ext = filepath.suffix.lower()

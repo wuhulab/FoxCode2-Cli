@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
@@ -6,8 +7,16 @@ from . import log_tool
 
 def _resolve_safe_path(workspace_dir: Path, filename: str) -> Path:
     resolved = (workspace_dir / filename).resolve()
-    if not str(resolved).startswith(str(workspace_dir.resolve())):
+    workspace_resolved = workspace_dir.resolve()
+    workspace_norm = os.path.normcase(str(workspace_resolved))
+    resolved_norm = os.path.normcase(str(resolved))
+    if resolved_norm == workspace_norm:
+        return resolved
+    if not resolved_norm.startswith(workspace_norm):
         raise ValueError(f"路径越权: {filename} 不在工作区内")
+    if not workspace_norm.endswith(os.sep):
+        if resolved_norm[len(workspace_norm)] != os.sep:
+            raise ValueError(f"路径越权: {filename} 不在工作区内")
     return resolved
 
 
@@ -70,9 +79,12 @@ def register(agent):
             return f"错误: 在 {filename} 中未找到要替换的字符串，请确认 old_string 完全匹配"
         if count > 1:
             return f"错误: 在 {filename} 中找到 {count} 处匹配，请提供更多上下文以确保唯一匹配"
-        ctx.deps.undo_manager.record("write", filename, old_content=content)
         new_content = content.replace(old_string, new_string, 1)
-        filepath.write_text(new_content, encoding="utf-8")
+        try:
+            filepath.write_text(new_content, encoding="utf-8")
+        except Exception as e:
+            return f"错误: 写入文件失败 - {e}"
+        ctx.deps.undo_manager.record("write", filename, old_content=content)
         ctx.deps.tool_tracker.add_chars(len(new_content))
         return f"已更新 {filename}"
 
@@ -91,8 +103,11 @@ def register(agent):
             old_content = filepath.read_text(encoding="utf-8")
         except Exception as e:
             return f"错误: 读取文件失败 - {e}"
-        ctx.deps.undo_manager.record("write", filename, old_content=old_content)
-        filepath.write_text(content, encoding="utf-8")
+        try:
+            filepath.write_text(content, encoding="utf-8")
+        except Exception as e:
+            return f"错误: 写入文件失败 - {e}"
+        ctx.deps.undo_manager.record("overwrite", filename, old_content=old_content)
         ctx.deps.tool_tracker.add_chars(len(content))
         return f"已覆盖写入 {filename}"
 
@@ -111,9 +126,12 @@ def register(agent):
             old_content = filepath.read_text(encoding="utf-8")
         except Exception as e:
             return f"错误: 读取文件失败 - {e}"
+        try:
+            with filepath.open("a", encoding="utf-8") as f:
+                f.write(content)
+        except Exception as e:
+            return f"错误: 追加文件失败 - {e}"
         ctx.deps.undo_manager.record("append", filename, old_content=old_content)
-        with filepath.open("a", encoding="utf-8") as f:
-            f.write(content)
         ctx.deps.tool_tracker.add_chars(len(content))
         return f"已追加内容到 {filename}"
 
@@ -132,7 +150,10 @@ def register(agent):
             old_content = filepath.read_text(encoding="utf-8")
         except Exception as e:
             return f"错误: 读取文件失败 - {e}"
-        filepath.unlink()
+        try:
+            filepath.unlink()
+        except Exception as e:
+            return f"错误: 删除文件失败 - {e}"
         ctx.deps.undo_manager.record("delete", filename, old_content=old_content)
         return f"已删除文件 {filename}"
 
@@ -150,7 +171,10 @@ def register(agent):
             return f"错误: 文件 {old_filename} 不存在"
         if new_path.exists():
             return f"错误: 目标文件 {new_filename} 已存在"
-        old_path.rename(new_path)
+        try:
+            old_path.rename(new_path)
+        except Exception as e:
+            return f"错误: 重命名文件失败 - {e}"
         ctx.deps.undo_manager.record("rename", new_filename, old_content=old_filename)
         return f"已重命名 {old_filename} -> {new_filename}"
 
@@ -180,13 +204,13 @@ def register(agent):
                     continue
                 rel_path = entry.relative_to(ctx.deps.workspace_dir)
                 if entry.is_dir():
-                    lines.append(f"{'/' + str(rel_path)}/")
+                    lines.append(f"{rel_path}/")
                 else:
                     try:
                         size = entry.stat().st_size
                     except OSError:
                         size = 0
-                    lines.append(f"{'/' + str(rel_path)} ({size} bytes)")
+                    lines.append(f"{rel_path} ({size} bytes)")
         except Exception as e:
             return f"错误: 列出文件失败 - {e}"
         return "\n".join(lines) if lines else f"路径 {path} 为空"
