@@ -9,12 +9,14 @@ from pydantic_ai.exceptions import (
     ModelAPIError,
 )
 from rich.console import Console
-from rich.live import Live
 from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.table import Table
 from rich.text import Text
 from rich import box
+from rich.spinner import SPINNERS
+
+SPINNERS["fox"] = {"interval": 100, "frames": ["-", "/", "\\", "-"]}
 
 from .config import load_config
 from .models import ActionPlan, WorkspaceDeps, UndoManager
@@ -26,6 +28,10 @@ console = Console()
 class RetryClient(httpx.AsyncClient):
     RETRY_STATUSES = frozenset({403, 429, 500, 502, 503, 504})
     MAX_RETRIES = 5
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("timeout", httpx.Timeout(120.0))
+        super().__init__(*args, **kwargs)
 
     async def send(self, request, *args, **kwargs):
         retry_count = 0
@@ -114,14 +120,15 @@ def print_help():
     console.print(table)
 
 
-def print_action_plan(plan: ActionPlan):
+def print_action_plan(plan: ActionPlan, skip_explanation: bool = False):
     console.print()
-    panel = Panel(
-        Markdown(plan.explanation),
-        title="[bold green]AI 响应[/bold green]",
-        border_style="green",
-    )
-    console.print(panel)
+    if not skip_explanation:
+        panel = Panel(
+            Markdown(plan.explanation),
+            title="[bold green]AI 响应[/bold green]",
+            border_style="green",
+        )
+        console.print(panel)
 
     if plan.files_modified:
         table = Table(box=box.SIMPLE)
@@ -192,7 +199,10 @@ async def main_async():
         if proxy_url:
             proxy_mounts[scheme] = httpx.AsyncHTTPTransport(proxy=proxy_url)
 
-    async with RetryClient(mounts=proxy_mounts or None) as http_client:
+    async with RetryClient(
+        mounts=proxy_mounts or None,
+        timeout=httpx.Timeout(config["request_timeout"]),
+    ) as http_client:
         undo_manager = UndoManager()
         deps = WorkspaceDeps(
             workspace_dir=workspace_dir,
@@ -246,56 +256,77 @@ async def main_async():
                 deps.tool_tracker.reset()
                 console.print("[dim]────────────────────────────────────────[/dim]")
 
-                spinner_chars = "-/\\-"
-                frame = 0
+                streamed = False
+                if config.get("stream_output"):
+                    with console.status("", spinner="fox") as status:
 
-                status_text = Text("")
-                live = Live(
-                    status_text,
-                    refresh_per_second=10,
-                    console=console,
-                    transient=True,
-                )
-                live.start()
+                        async def status_updater():
+                            try:
+                                while True:
+                                    msg = deps.tool_tracker.status_line("").strip()
+                                    status.update(msg)
+                                    await asyncio.sleep(0.1)
+                            except asyncio.CancelledError:
+                                pass
 
-                async def updater():
-                    nonlocal frame
-                    try:
-                        while True:
-                            sp = spinner_chars[frame % len(spinner_chars)]
-                            frame += 1
-                            line = deps.tool_tracker.status_line(sp)
-                            t = Text(line)
-                            t.stylize("bold cyan")
-                            live.update(t)
-                            await asyncio.sleep(0.1)
-                    except asyncio.CancelledError:
-                        pass
-                    except Exception:
-                        pass
+                        update_task = asyncio.create_task(status_updater())
+                        try:
+                            async with agent.run_stream(
+                                prompt,
+                                message_history=all_messages,
+                                deps=deps,
+                            ) as stream_result:
+                                full_text = ""
+                                async for chunk in stream_result.stream_output():
+                                    full_text = chunk.explanation or full_text
+                        finally:
+                            update_task.cancel()
+                            try:
+                                await update_task
+                            except asyncio.CancelledError:
+                                pass
+                    all_messages = stream_result.all_messages()
+                    plan = await stream_result.get_output()
+                    streamed = True
+                    if full_text:
+                        console.print(Markdown(full_text))
+                else:
+                    with console.status("", spinner="fox") as status:
 
-                update_task = asyncio.create_task(updater())
-                try:
-                    result = await agent.run(
-                        prompt,
-                        message_history=all_messages,
-                        deps=deps,
-                    )
-                finally:
-                    update_task.cancel()
-                    live.stop()
+                        async def status_updater():
+                            try:
+                                while True:
+                                    msg = deps.tool_tracker.status_line("").strip()
+                                    status.update(msg)
+                                    await asyncio.sleep(0.1)
+                            except asyncio.CancelledError:
+                                pass
 
-                all_messages = result.all_messages()
+                        update_task = asyncio.create_task(status_updater())
+                        try:
+                            result = await agent.run(
+                                prompt,
+                                message_history=all_messages,
+                                deps=deps,
+                            )
+                        finally:
+                            update_task.cancel()
+                            try:
+                                await update_task
+                            except asyncio.CancelledError:
+                                pass
+                    all_messages = result.all_messages()
+                    plan = result.output
+
                 if len(all_messages) > max_history_messages:
                     cutoff = len(all_messages) - max_history_messages
                     all_messages = all_messages[cutoff:]
-                plan = result.output
 
                 summary = deps.tool_tracker.summary_str()
                 if summary:
                     console.print(f"  [bold cyan]工具调用: {summary}[/bold cyan]")
 
-                print_action_plan(plan)
+                print_action_plan(plan, skip_explanation=streamed)
 
             except UnexpectedModelBehavior as e:
                 console.print(f"[red]API 响应格式错误: {e}[/red]")

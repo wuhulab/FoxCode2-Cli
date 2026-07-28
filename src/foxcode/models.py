@@ -178,13 +178,13 @@ class ToolTracker:
         return "，".join(parts) if parts else ""
 
     def status_line(self, spinner: str, lang: str = "zh") -> str:
-        status = STATUS_NAMES.get(self._current_tool, "处理中")
+        status = STATUS_NAMES.get(self._current_tool, "思考中")
         icon = ICONS.get(self._current_tool, "⚙️")
-        parts = [f"{spinner} {icon} {status}"]
-
         summary = self.summary_str(lang)
         if summary:
-            parts.append(f"调用 {summary}")
+            parts = [f"{spinner} {icon} {status} ({summary})"]
+        else:
+            parts = [f"{spinner} {icon} {status}"]
 
         tokens = self.estimated_tokens
         if tokens > 500:
@@ -194,7 +194,7 @@ class ToolTracker:
             else:
                 parts.append(f"{tokens / 1000:.1f}k token")
 
-        return "  ".join(parts)
+        return "  ".join(parts) + " Thinking..."
 
 
 @dataclass

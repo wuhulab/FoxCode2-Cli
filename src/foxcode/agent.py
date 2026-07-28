@@ -18,6 +18,8 @@ def create_agent(
         ),
     )
 
+    model_settings = ModelSettings(temperature=config["temperature"])
+
     agent: Agent[WorkspaceDeps, ActionPlan] = Agent(
         model,
         deps_type=WorkspaceDeps,
@@ -36,7 +38,7 @@ def create_agent(
             "7. 如果操作出错，可以使用 undo_last 撤销。\n"
             "8. 每次操作后，在 ActionPlan 中清晰说明做了什么、修改了哪些文件。"
         ),
-        model_settings=ModelSettings(temperature=config["temperature"]),
+        model_settings=model_settings,
     )
 
     from .tools import file_ops, shell, search, undo
