@@ -1,4 +1,5 @@
 import asyncio
+import subprocess
 import sys
 from pathlib import Path
 import httpx
@@ -98,6 +99,7 @@ def print_welcome():
     title = Panel.fit(
         "[bold cyan]FoxCode Cli[/bold cyan] v0.2.0\n"
         "[yellow]/help[/yellow] 查看命令  "
+        "[yellow]/term[/yellow] 终端模式  "
         "[yellow]/undo[/yellow] 撤销操作  "
         "[yellow]/history[/yellow] 操作历史  "
         "[yellow]/clear[/yellow] 清屏  "
@@ -113,6 +115,7 @@ def print_help():
     table.add_column("命令", style="yellow")
     table.add_column("说明", style="white")
     table.add_row("/help", "显示此帮助")
+    table.add_row("/term", "切换终端模式 (Ctrl+X)，输入直接作为命令执行")
     table.add_row("/undo [n]", "撤销最近 n 步操作（默认 1 步）")
     table.add_row("/history", "显示操作历史")
     table.add_row("/clear", "清屏")
@@ -160,6 +163,34 @@ def run_undo(deps: WorkspaceDeps, steps: int = 1):
 def show_history(deps: WorkspaceDeps):
     result = deps.undo_manager.history_summary()
     console.print(f"[cyan]{result}[/cyan]")
+
+
+def _exec_shell(command: str, cwd: Path, timeout: int = 120) -> str:
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            cwd=str(cwd),
+        )
+        output = ""
+        if result.stdout:
+            output += result.stdout.rstrip()
+        if result.stderr:
+            if output:
+                output += "\n"
+            output += f"[stderr]\n{result.stderr.rstrip()}"
+        if result.returncode != 0:
+            output += f"\n退出码: {result.returncode}"
+        return output if output else "(命令执行成功，无输出)"
+    except subprocess.TimeoutExpired:
+        return f"错误: 命令执行超时 ({timeout}秒)"
+    except Exception as e:
+        return f"错误: 命令执行失败 - {e}"
 
 
 async def main_async():
@@ -216,13 +247,64 @@ async def main_async():
         all_messages = []
         max_history_messages = 50
 
+        terminal_mode = False
+        terminal_cwd = workspace_dir
+
         while True:
             try:
-                prompt = console.input(">> ").strip()
+                if terminal_mode:
+                    prompt = console.input(
+                        f"[bold yellow]{terminal_cwd}>[/bold yellow] "
+                    ).strip()
+                else:
+                    prompt = console.input("[bold cyan]>>[/bold cyan] ").strip()
             except (EOFError, KeyboardInterrupt):
                 break
 
+            # Ctrl+X detection: toggle terminal mode
+            if "\x18" in prompt:
+                prompt = prompt.replace("\x18", "").strip()
+                terminal_mode = not terminal_mode
+                status = "开启" if terminal_mode else "关闭"
+                console.print(f"[yellow]终端模式 {status} (Ctrl+X 切换)[/yellow]")
+                if not prompt:
+                    continue
+
             if not prompt:
+                continue
+
+            if terminal_mode:
+                cmd_text = prompt.strip()
+                if cmd_text == "cd":
+                    console.print(str(terminal_cwd))
+                    continue
+                elif cmd_text.startswith("cd "):
+                    target = cmd_text[3:].strip().strip('"').strip("'")
+                    try:
+                        new_cwd = Path(target)
+                        if not new_cwd.is_absolute():
+                            new_cwd = (terminal_cwd / new_cwd).resolve()
+                        else:
+                            new_cwd = new_cwd.resolve()
+                        if new_cwd.is_dir():
+                            terminal_cwd = new_cwd
+                        else:
+                            console.print(f"cd: {target}: 没有那个目录")
+                    except (OSError, ValueError):
+                        console.print(f"cd: {target}: 没有那个目录")
+                    continue
+
+                console.print(Text(f"  执行: {prompt}", style="dim"))
+                try:
+                    subprocess.run(
+                        prompt,
+                        shell=True,
+                        cwd=str(terminal_cwd),
+                    )
+                except KeyboardInterrupt:
+                    console.print("\n[yellow]命令已中断[/yellow]")
+                except Exception as e:
+                    console.print(f"[red]错误: 命令执行失败 - {e}[/red]")
                 continue
 
             if prompt.startswith("/"):
@@ -231,6 +313,11 @@ async def main_async():
                     break
                 elif cmd == "/help":
                     print_help()
+                    continue
+                elif cmd == "/term":
+                    terminal_mode = not terminal_mode
+                    status = "开启" if terminal_mode else "关闭"
+                    console.print(f"[yellow]终端模式 {status} (Ctrl+X 切换)[/yellow]")
                     continue
                 elif cmd == "/clear":
                     console.clear()
