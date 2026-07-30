@@ -409,12 +409,18 @@ async def main_async():
                             for s in sessions:
                                 table.add_row(
                                     s["name"],
-                                    str(s["size"]) if isinstance(s["size"], int) else "?",
+                                    str(s["size"])
+                                    if isinstance(s["size"], int)
+                                    else "?",
                                     s["modified"],
                                 )
                             console.print(table)
                     elif action == "save":
-                        name = parts[2] if len(parts) > 2 else session_manager.get_auto_save_name()
+                        name = (
+                            parts[2]
+                            if len(parts) > 2
+                            else session_manager.get_auto_save_name()
+                        )
                         result = session_manager.save_session(name, all_messages)
                         console.print(f"[green]{result}[/green]")
                     elif action == "load":
@@ -514,16 +520,12 @@ async def main_async():
                             else:
                                 console.print("[red]提交已取消[/red]")
                     continue
-elif not cmd.startswith("/"):
-                    pass
                 else:
                     custom_found = False
                     for cname, cprompt in project_config["commands"].items():
                         if cmd in (f"/{cname}", f"/{cname} "):
                             prompt = cprompt
-                            console.print(
-                                f"[dim]执行自定义命令: {cname}[/dim]"
-                            )
+                            console.print(f"[dim]执行自定义命令: {cname}[/dim]")
                             custom_found = True
                             break
                     if not custom_found:
