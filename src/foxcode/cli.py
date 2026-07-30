@@ -99,11 +99,12 @@ class RetryClient(httpx.AsyncClient):
 
 def print_welcome():
     title = Panel.fit(
-        "[bold cyan]FoxCode Cli[/bold cyan] v0.2.0\n"
+        "[bold cyan]FoxCode Cli[/bold cyan] v0.3.0\n"
         "[yellow]/help[/yellow] 查看命令  "
         "[yellow]/term[/yellow] 终端模式  "
         "[yellow]/commit[/yellow] 智能提交  "
         "[yellow]/session[/yellow] 会话管理  "
+        "[yellow]/export[/yellow] 导出会话  "
         "[yellow]/usage[/yellow] 用量统计  "
         "[yellow]/undo[/yellow] 撤销操作  "
         "[yellow]/clear[/yellow] 清屏  "
@@ -125,6 +126,7 @@ def print_help():
     table.add_row("/session save [名称]", "保存当前会话（默认自动命名）")
     table.add_row("/session load <名称>", "加载指定会话")
     table.add_row("/session del <名称>", "删除指定会话")
+    table.add_row("/export [文件名]", "导出当前会话为 Markdown 文件")
     table.add_row("/undo [n]", "撤销最近 n 步操作（默认 1 步）")
     table.add_row("/history", "显示操作历史")
     table.add_row("/usage", "显示本次会话的 API 用量和费用统计")
@@ -449,6 +451,52 @@ async def main_async():
                         console.print(
                             "[yellow]用法: /session list|save [名称]|load <名称>|del <名称>[/yellow]"
                         )
+                    continue
+                elif cmd.startswith("/export"):
+                    parts = prompt.split(maxsplit=1)
+                    default_name = f"session_{session_manager.get_auto_save_name()}.md"
+                    out_name = parts[1] if len(parts) > 1 else default_name
+                    out_path = workspace_dir / out_name
+                    try:
+                        lines = ["# FoxCode 会话导出\n"]
+                        for i, msg in enumerate(all_messages, 1):
+                            role = "unknown"
+                            content = ""
+                            if hasattr(msg, "kind"):
+                                if msg.kind == "request":
+                                    role = "user"
+                                    if hasattr(msg, "parts"):
+                                        for part in msg.parts:
+                                            if hasattr(part, "content"):
+                                                content += str(part.content)
+                                    elif hasattr(msg, "content"):
+                                        content = str(msg.content)
+                                elif msg.kind == "response":
+                                    role = "assistant"
+                                    if hasattr(msg, "parts"):
+                                        for part in msg.parts:
+                                            if hasattr(part, "content"):
+                                                content += str(part.content)
+                                    elif hasattr(msg, "output"):
+                                        content = str(msg.output)
+                                    elif hasattr(msg, "data"):
+                                        content = str(msg.data)
+                            elif hasattr(msg, "role"):
+                                role = msg.role
+                                if hasattr(msg, "content"):
+                                    content = str(msg.content)
+                            elif isinstance(msg, dict):
+                                role = msg.get("role", "unknown")
+                                content = str(msg.get("content", msg.get("data", "")))
+                            else:
+                                content = str(msg)
+                            if content.strip():
+                                lines.append(f"## [{i}] {role}\n")
+                                lines.append(f"{content.strip()}\n")
+                        out_path.write_text("\n".join(lines), encoding="utf-8")
+                        console.print(f"[green]会话已导出: {out_path}[/green]")
+                    except Exception as e:
+                        console.print(f"[red]导出失败: {e}[/red]")
                     continue
                 elif cmd.startswith("/undo"):
                     parts = cmd.split()
