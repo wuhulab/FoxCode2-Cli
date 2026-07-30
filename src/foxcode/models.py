@@ -235,3 +235,4 @@ class WorkspaceDeps:
     console: Console = Console()
     tool_tracker: ToolTracker = field(default_factory=ToolTracker)
     shell_timeout: int = 30
+    project_instructions: str = ""

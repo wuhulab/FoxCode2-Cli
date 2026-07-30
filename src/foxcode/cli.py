@@ -20,7 +20,7 @@ from rich.spinner import SPINNERS
 
 SPINNERS["fox"] = {"interval": 100, "frames": ["-", "/", "\\", "-"]}
 
-from .config import load_config
+from .config import load_config, load_project_config
 from .models import ActionPlan, WorkspaceDeps, UndoManager
 from .agent import create_agent
 
@@ -211,6 +211,12 @@ async def main_async():
         sys.exit(1)
     console.print(f"[dim]工作目录: {workspace_dir}[/dim]")
     console.print(f"[dim]模型: {config['model']}[/dim]")
+
+    project_config = load_project_config(workspace_dir)
+    if project_config["instructions"]:
+        console.print(
+            f"[dim]项目指南: .foxcode/instructions.md 已加载 ({len(project_config['instructions'])} 字符)[/dim]"
+        )
     console.print()
 
     proxy_mounts = {}
@@ -242,8 +248,9 @@ async def main_async():
             undo_manager=undo_manager,
             console=console,
             shell_timeout=config["shell_timeout"],
+            project_instructions=project_config["instructions"],
         )
-        agent = create_agent(config, http_client)
+        agent = create_agent(config, http_client, project_config["instructions"])
 
         all_messages = []
         max_history_messages = 50

@@ -1,8 +1,32 @@
+import json
 import os
 from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def load_project_config(workspace_dir: Path) -> dict:
+    foxcode_dir = workspace_dir / ".foxcode"
+    config = {"instructions": "", "settings": {}}
+
+    instructions_file = foxcode_dir / "instructions.md"
+    if instructions_file.exists():
+        try:
+            config["instructions"] = instructions_file.read_text(
+                encoding="utf-8"
+            ).strip()
+        except Exception:
+            pass
+
+    settings_file = foxcode_dir / "settings.json"
+    if settings_file.exists():
+        try:
+            config["settings"] = json.loads(settings_file.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    return config
 
 
 def load_config():
