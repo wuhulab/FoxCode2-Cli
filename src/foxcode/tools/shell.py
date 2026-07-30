@@ -4,6 +4,7 @@ from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
 from ..tools.file_ops import _resolve_safe_path
 from . import log_tool
+from .security import check_shell_security, format_security_warnings
 
 
 def register(agent):
@@ -11,6 +12,10 @@ def register(agent):
     async def run_shell(ctx: RunContext[WorkspaceDeps], command: str) -> str:
         cmd_preview = command[:60] + "..." if len(command) > 60 else command
         log_tool(ctx, "run_shell", cmd_preview)
+        findings = check_shell_security(command)
+        warning = format_security_warnings(findings)
+        if warning:
+            ctx.deps.console.print(warning)
         filepath = ctx.deps.workspace_dir
         try:
             result = subprocess.run(

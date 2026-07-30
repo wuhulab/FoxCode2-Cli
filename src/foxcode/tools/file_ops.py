@@ -3,6 +3,7 @@ from pathlib import Path
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
 from . import log_tool
+from .security import check_content_security, format_security_warnings
 
 
 def _resolve_safe_path(workspace_dir: Path, filename: str) -> Path:
@@ -18,6 +19,13 @@ def _resolve_safe_path(workspace_dir: Path, filename: str) -> Path:
         if resolved_norm[len(workspace_norm)] != os.sep:
             raise ValueError(f"路径越权: {filename} 不在工作区内")
     return resolved
+
+
+def _warn_security(ctx: RunContext[WorkspaceDeps], content: str):
+    findings = check_content_security(content)
+    warning = format_security_warnings(findings)
+    if warning:
+        ctx.deps.console.print(warning)
 
 
 def register(agent):
@@ -41,7 +49,10 @@ def register(agent):
 
     @agent.tool
     async def read_file_range(
-        ctx: RunContext[WorkspaceDeps], filename: str, start_line: int = 1, end_line: int = 0
+        ctx: RunContext[WorkspaceDeps],
+        filename: str,
+        start_line: int = 1,
+        end_line: int = 0,
     ) -> str:
         log_tool(ctx, "read_file_range", filename, f"{start_line}-{end_line or 'end'}")
         try:
@@ -75,6 +86,7 @@ def register(agent):
         ctx: RunContext[WorkspaceDeps], filename: str, content: str
     ) -> str:
         log_tool(ctx, "create_file", filename)
+        _warn_security(ctx, content)
         try:
             filepath = _resolve_safe_path(ctx.deps.workspace_dir, filename)
         except ValueError as e:
@@ -95,6 +107,7 @@ def register(agent):
         ctx: RunContext[WorkspaceDeps], filename: str, old_string: str, new_string: str
     ) -> str:
         log_tool(ctx, "write_file", filename)
+        _warn_security(ctx, new_string)
         try:
             filepath = _resolve_safe_path(ctx.deps.workspace_dir, filename)
         except ValueError as e:
@@ -124,6 +137,7 @@ def register(agent):
         ctx: RunContext[WorkspaceDeps], filename: str, content: str
     ) -> str:
         log_tool(ctx, "write_file_complete", filename)
+        _warn_security(ctx, content)
         try:
             filepath = _resolve_safe_path(ctx.deps.workspace_dir, filename)
         except ValueError as e:
@@ -147,6 +161,7 @@ def register(agent):
         ctx: RunContext[WorkspaceDeps], filename: str, content: str
     ) -> str:
         log_tool(ctx, "append_file", filename)
+        _warn_security(ctx, content)
         try:
             filepath = _resolve_safe_path(ctx.deps.workspace_dir, filename)
         except ValueError as e:
