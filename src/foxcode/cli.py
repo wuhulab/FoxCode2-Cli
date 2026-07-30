@@ -571,7 +571,7 @@ async def main_async():
                     all_messages = stream_result.all_messages()
                     plan = await stream_result.get_output()
                     streamed = True
-                    usage = stream_result.usage()
+                    usage = stream_result.usage
                     if usage:
                         deps.tool_tracker.record_usage(
                             usage.input_tokens or 0,
