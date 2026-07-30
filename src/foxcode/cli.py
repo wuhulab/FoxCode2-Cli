@@ -20,7 +20,7 @@ from rich.spinner import SPINNERS
 
 SPINNERS["fox"] = {"interval": 100, "frames": ["-", "/", "\\", "-"]}
 
-from .config import load_config, load_project_config
+from .config import load_config, load_project_config, apply_project_settings
 from .models import ActionPlan, WorkspaceDeps, UndoManager
 from .agent import create_agent
 
@@ -252,10 +252,12 @@ async def main_async():
     if not workspace_dir.is_dir():
         console.print(f"[red]错误: 工作目录路径存在但不是目录: {workspace_dir}[/red]")
         sys.exit(1)
-    console.print(f"[dim]工作目录: {workspace_dir}[/dim]")
-    console.print(f"[dim]模型: {config['model']}[/dim]")
 
     project_config = load_project_config(workspace_dir)
+    config = apply_project_settings(config, project_config)
+
+    console.print(f"[dim]工作目录: {workspace_dir}[/dim]")
+    console.print(f"[dim]模型: {config['model']}[/dim]")
     if project_config["instructions"]:
         console.print(
             f"[dim]项目指南: .foxcode/instructions.md 已加载 ({len(project_config['instructions'])} 字符)[/dim]"
@@ -451,11 +453,23 @@ async def main_async():
                             else:
                                 console.print("[red]提交已取消[/red]")
                     continue
+elif not cmd.startswith("/"):
+                    pass
                 else:
-                    console.print(
-                        f"[red]未知命令: {cmd} (输入 /help 查看可用命令)[/red]"
-                    )
-                    continue
+                    custom_found = False
+                    for cname, cprompt in project_config["commands"].items():
+                        if cmd in (f"/{cname}", f"/{cname} "):
+                            prompt = cprompt
+                            console.print(
+                                f"[dim]执行自定义命令: {cname}[/dim]"
+                            )
+                            custom_found = True
+                            break
+                    if not custom_found:
+                        console.print(
+                            f"[red]未知命令: {cmd} (输入 /help 查看可用命令)[/red]"
+                        )
+                        continue
 
             try:
                 deps.tool_tracker.reset()

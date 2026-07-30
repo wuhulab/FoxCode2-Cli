@@ -8,7 +8,7 @@ load_dotenv()
 
 def load_project_config(workspace_dir: Path) -> dict:
     foxcode_dir = workspace_dir / ".foxcode"
-    config = {"instructions": "", "settings": {}}
+    config = {"instructions": "", "settings": {}, "commands": {}}
 
     instructions_file = foxcode_dir / "instructions.md"
     if instructions_file.exists():
@@ -26,6 +26,43 @@ def load_project_config(workspace_dir: Path) -> dict:
         except Exception:
             pass
 
+    config["commands"] = load_custom_commands(foxcode_dir)
+
+    return config
+
+
+def load_custom_commands(foxcode_dir: Path) -> dict[str, str]:
+    commands = {}
+    commands_dir = foxcode_dir / "commands"
+    if not commands_dir.is_dir():
+        return commands
+    try:
+        for f in sorted(commands_dir.iterdir()):
+            if f.suffix.lower() in (".md", ".txt") and f.is_file():
+                name = f.stem.lower()
+                content = f.read_text(encoding="utf-8").strip()
+                if content:
+                    commands[name] = content
+    except Exception:
+        pass
+    return commands
+
+
+def apply_project_settings(config: dict, project_config: dict) -> dict:
+    settings = project_config.get("settings", {})
+    if not settings:
+        return config
+    config = dict(config)
+    for key in ("model", "temperature", "shell_timeout", "request_timeout"):
+        if key in settings:
+            config[key] = settings[key]
+    if "stream_output" in settings:
+        val = settings["stream_output"]
+        config["stream_output"] = (
+            str(val).lower() in ("true", "1", "yes")
+            if not isinstance(val, bool)
+            else val
+        )
     return config
 
 
