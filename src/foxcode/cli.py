@@ -23,6 +23,7 @@ SPINNERS["fox"] = {"interval": 100, "frames": ["-", "/", "\\", "-"]}
 from .config import load_config, load_project_config, apply_project_settings
 from .models import ActionPlan, WorkspaceDeps, UndoManager
 from .agent import create_agent
+from .session import SessionManager
 
 console = Console()
 
@@ -102,6 +103,7 @@ def print_welcome():
         "[yellow]/help[/yellow] 查看命令  "
         "[yellow]/term[/yellow] 终端模式  "
         "[yellow]/commit[/yellow] 智能提交  "
+        "[yellow]/session[/yellow] 会话管理  "
         "[yellow]/usage[/yellow] 用量统计  "
         "[yellow]/undo[/yellow] 撤销操作  "
         "[yellow]/clear[/yellow] 清屏  "
@@ -119,11 +121,15 @@ def print_help():
     table.add_row("/help", "显示此帮助")
     table.add_row("/term", "切换终端模式 (Ctrl+X)，输入直接作为命令执行")
     table.add_row("/commit [信息]", "暂存所有变更并用 AI 生成提交信息后提交")
+    table.add_row("/session list", "列出所有已保存的会话")
+    table.add_row("/session save [名称]", "保存当前会话（默认自动命名）")
+    table.add_row("/session load <名称>", "加载指定会话")
+    table.add_row("/session del <名称>", "删除指定会话")
     table.add_row("/undo [n]", "撤销最近 n 步操作（默认 1 步）")
     table.add_row("/history", "显示操作历史")
     table.add_row("/usage", "显示本次会话的 API 用量和费用统计")
     table.add_row("/clear", "清屏")
-    table.add_row("/exit 或 /quit", "退出程序")
+    table.add_row("/exit 或 /quit", "退出程序（自动保存会话）")
     console.print(table)
 
 
@@ -287,6 +293,7 @@ async def main_async():
         timeout=httpx.Timeout(config["request_timeout"]),
     ) as http_client:
         undo_manager = UndoManager()
+        session_manager = SessionManager(workspace_dir / ".foxcode" / "sessions")
         deps = WorkspaceDeps(
             workspace_dir=workspace_dir,
             http_client=http_client,
@@ -363,6 +370,10 @@ async def main_async():
             if prompt.startswith("/"):
                 cmd = prompt.strip().lower()
                 if cmd in ("/exit", "/quit"):
+                    if all_messages:
+                        name = session_manager.get_auto_save_name()
+                        session_manager.save_session(name, all_messages)
+                        console.print(f"[dim]会话已自动保存: {name}[/dim]")
                     break
                 elif cmd == "/help":
                     print_help()
@@ -382,6 +393,56 @@ async def main_async():
                 elif cmd == "/usage":
                     u = deps.tool_tracker.usage_summary(config["model"])
                     console.print(f"[cyan]会话用量统计:[/cyan]\n  {u}")
+                    continue
+                elif cmd.startswith("/session"):
+                    parts = cmd.split(maxsplit=2)
+                    action = parts[1] if len(parts) > 1 else ""
+                    if action == "list":
+                        sessions = session_manager.list_sessions()
+                        if not sessions:
+                            console.print("[yellow]暂无保存的会话[/yellow]")
+                        else:
+                            table = Table(title="已保存的会话", box=box.SIMPLE)
+                            table.add_column("名称", style="cyan")
+                            table.add_column("消息数", style="white")
+                            table.add_column("保存时间", style="dim")
+                            for s in sessions:
+                                table.add_row(
+                                    s["name"],
+                                    str(s["size"]) if isinstance(s["size"], int) else "?",
+                                    s["modified"],
+                                )
+                            console.print(table)
+                    elif action == "save":
+                        name = parts[2] if len(parts) > 2 else session_manager.get_auto_save_name()
+                        result = session_manager.save_session(name, all_messages)
+                        console.print(f"[green]{result}[/green]")
+                    elif action == "load":
+                        name = parts[2] if len(parts) > 2 else ""
+                        if not name:
+                            console.print("[yellow]用法: /session load <名称>[/yellow]")
+                        else:
+                            loaded = session_manager.load_session(name)
+                            if loaded is None:
+                                console.print(f"[red]未找到会话: {name}[/red]")
+                            else:
+                                all_messages.clear()
+                                all_messages.extend(loaded)
+                                console.print(
+                                    f"[green]已加载会话: {name} ({len(loaded)} 条消息)[/green]"
+                                )
+                    elif action in ("del", "delete", "rm"):
+                        name = parts[2] if len(parts) > 2 else ""
+                        if not name:
+                            console.print("[yellow]用法: /session del <名称>[/yellow]")
+                        elif session_manager.delete_session(name):
+                            console.print(f"[green]已删除会话: {name}[/green]")
+                        else:
+                            console.print(f"[red]删除失败: {name}[/red]")
+                    else:
+                        console.print(
+                            "[yellow]用法: /session list|save [名称]|load <名称>|del <名称>[/yellow]"
+                        )
                     continue
                 elif cmd.startswith("/undo"):
                     parts = cmd.split()
