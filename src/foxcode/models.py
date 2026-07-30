@@ -7,6 +7,35 @@ import httpx
 from rich.console import Console
 
 
+MODEL_PRICING: dict[str, tuple[float, float]] = {
+    "gpt-4o": (2.50, 10.00),
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4-turbo": (10.00, 30.00),
+    "gpt-4": (30.00, 60.00),
+    "gpt-3.5-turbo": (0.50, 1.50),
+    "claude-3-5-sonnet-20241022": (3.00, 15.00),
+    "claude-3-5-haiku-20241022": (0.80, 4.00),
+    "claude-3-opus-20240229": (15.00, 75.00),
+    "claude-4-sonnet-20250514": (3.00, 15.00),
+    "deepseek-chat": (0.27, 1.10),
+    "deepseek-reasoner": (0.55, 2.19),
+    "gemini-2.0-flash": (0.10, 0.40),
+    "gemini-2.0-pro": (2.00, 5.00),
+}
+
+
+def estimate_cost(
+    model_name: str, input_tokens: int, output_tokens: int
+) -> Optional[float]:
+    for key, (input_price, output_price) in MODEL_PRICING.items():
+        if key in model_name or model_name in key:
+            cost = (input_tokens / 1_000_000 * input_price) + (
+                output_tokens / 1_000_000 * output_price
+            )
+            return round(cost, 6)
+    return None
+
+
 STATUS_NAMES = {
     "read_file": "读取中",
     "create_file": "创建中",
@@ -169,6 +198,10 @@ class ToolTracker:
     _current_tool: str = ""
     _total_chars: int = 0
     max_tokens: int = 128000
+    cumulative_input_tokens: int = 0
+    cumulative_output_tokens: int = 0
+    session_cost: float = 0.0
+    session_requests: int = 0
 
     def reset(self):
         self._counts.clear()
@@ -182,6 +215,14 @@ class ToolTracker:
 
     def add_chars(self, n: int):
         self._total_chars += n
+
+    def record_usage(self, input_tokens: int, output_tokens: int, model_name: str = ""):
+        self.cumulative_input_tokens += input_tokens
+        self.cumulative_output_tokens += output_tokens
+        self.session_requests += 1
+        cost = estimate_cost(model_name, input_tokens, output_tokens)
+        if cost is not None:
+            self.session_cost += cost
 
     @property
     def current_tool(self) -> str:
@@ -225,6 +266,18 @@ class ToolTracker:
                 parts.append(f"{tokens / 1000:.1f}k token")
 
         return "  ".join(parts) + " Thinking..."
+
+    def usage_summary(self, model_name: str = "") -> str:
+        parts = []
+        if self.session_requests > 0:
+            parts.append(f"请求: {self.session_requests}次")
+        if self.cumulative_input_tokens > 0:
+            parts.append(f"输入: {self.cumulative_input_tokens / 1000:.1f}k token")
+        if self.cumulative_output_tokens > 0:
+            parts.append(f"输出: {self.cumulative_output_tokens / 1000:.1f}k token")
+        if self.session_cost > 0:
+            parts.append(f"费用: ${self.session_cost:.6f}")
+        return " | ".join(parts) if parts else "暂无使用数据"
 
 
 @dataclass

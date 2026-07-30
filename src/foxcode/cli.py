@@ -102,6 +102,7 @@ def print_welcome():
         "[yellow]/help[/yellow] 查看命令  "
         "[yellow]/term[/yellow] 终端模式  "
         "[yellow]/commit[/yellow] 智能提交  "
+        "[yellow]/usage[/yellow] 用量统计  "
         "[yellow]/undo[/yellow] 撤销操作  "
         "[yellow]/clear[/yellow] 清屏  "
         "[yellow]/exit[/yellow] 退出",
@@ -120,6 +121,7 @@ def print_help():
     table.add_row("/commit [信息]", "暂存所有变更并用 AI 生成提交信息后提交")
     table.add_row("/undo [n]", "撤销最近 n 步操作（默认 1 步）")
     table.add_row("/history", "显示操作历史")
+    table.add_row("/usage", "显示本次会话的 API 用量和费用统计")
     table.add_row("/clear", "清屏")
     table.add_row("/exit 或 /quit", "退出程序")
     console.print(table)
@@ -375,6 +377,10 @@ async def main_async():
                 elif cmd == "/history":
                     show_history(deps)
                     continue
+                elif cmd == "/usage":
+                    u = deps.tool_tracker.usage_summary(config["model"])
+                    console.print(f"[cyan]会话用量统计:[/cyan]\n  {u}")
+                    continue
                 elif cmd.startswith("/undo"):
                     parts = cmd.split()
                     steps = 1
@@ -488,6 +494,13 @@ async def main_async():
                     all_messages = stream_result.all_messages()
                     plan = await stream_result.get_output()
                     streamed = True
+                    usage = stream_result.usage()
+                    if usage:
+                        deps.tool_tracker.record_usage(
+                            usage.input_tokens or 0,
+                            usage.output_tokens or 0,
+                            config["model"],
+                        )
                     if full_text:
                         console.print(Markdown(full_text))
                 else:
@@ -518,6 +531,13 @@ async def main_async():
                                 pass
                     all_messages = result.all_messages()
                     plan = result.output
+                    usage = result.usage()
+                    if usage:
+                        deps.tool_tracker.record_usage(
+                            usage.input_tokens or 0,
+                            usage.output_tokens or 0,
+                            config["model"],
+                        )
 
                 if len(all_messages) > max_history_messages:
                     cutoff = len(all_messages) - max_history_messages
@@ -526,6 +546,10 @@ async def main_async():
                 summary = deps.tool_tracker.summary_str()
                 if summary:
                     console.print(f"  [bold cyan]工具调用: {summary}[/bold cyan]")
+
+                usage_summary = deps.tool_tracker.usage_summary(config["model"])
+                if usage_summary:
+                    console.print(f"  [dim]用量: {usage_summary}[/dim]")
 
                 print_action_plan(plan, skip_explanation=streamed)
 
