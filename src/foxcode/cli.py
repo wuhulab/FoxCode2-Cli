@@ -101,8 +101,8 @@ def print_welcome():
         "[bold cyan]FoxCode Cli[/bold cyan] v0.2.0\n"
         "[yellow]/help[/yellow] 查看命令  "
         "[yellow]/term[/yellow] 终端模式  "
+        "[yellow]/commit[/yellow] 智能提交  "
         "[yellow]/undo[/yellow] 撤销操作  "
-        "[yellow]/history[/yellow] 操作历史  "
         "[yellow]/clear[/yellow] 清屏  "
         "[yellow]/exit[/yellow] 退出",
         box=box.HEAVY,
@@ -117,6 +117,7 @@ def print_help():
     table.add_column("说明", style="white")
     table.add_row("/help", "显示此帮助")
     table.add_row("/term", "切换终端模式 (Ctrl+X)，输入直接作为命令执行")
+    table.add_row("/commit [信息]", "暂存所有变更并用 AI 生成提交信息后提交")
     table.add_row("/undo [n]", "撤销最近 n 步操作（默认 1 步）")
     table.add_row("/history", "显示操作历史")
     table.add_row("/clear", "清屏")
@@ -192,6 +193,46 @@ def _exec_shell(command: str, cwd: Path, timeout: int = 120) -> str:
         return f"错误: 命令执行超时 ({timeout}秒)"
     except Exception as e:
         return f"错误: 命令执行失败 - {e}"
+
+
+async def _generate_commit_message(
+    http_client: httpx.AsyncClient, config: dict, diff: str
+) -> str:
+    diff_stat = _exec_shell("git diff --cached --stat", config["workspace_dir"])
+    try:
+        response = await http_client.post(
+            f"{config['base_url']}/chat/completions",
+            json={
+                "model": config["model"],
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a git commit message generator. "
+                            "Generate concise conventional commit messages "
+                            "(e.g., feat:, fix:, chore:, refactor:, docs:, test:, style:). "
+                            "Output ONLY the commit message, no explanation, no quotes."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Generate a commit message for this diff:\n\n"
+                            f"## Changes\n{diff_stat}\n\n## Full diff\n{diff[:2000]}"
+                        ),
+                    },
+                ],
+                "temperature": 0.3,
+                "max_tokens": 100,
+            },
+            headers={"Authorization": f"Bearer {config['api_key']}"},
+        )
+        response.raise_for_status()
+        data = response.json()
+        msg = data["choices"][0]["message"]["content"].strip().strip("\"'")
+        return msg
+    except Exception as e:
+        return None
 
 
 async def main_async():
@@ -340,6 +381,69 @@ async def main_async():
                     if len(parts) > 1 and parts[1].isdigit():
                         steps = int(parts[1])
                     run_undo(deps, steps)
+                    continue
+                elif cmd.startswith("/commit"):
+                    parts = cmd.split(maxsplit=1)
+                    msg = parts[1] if len(parts) > 1 else ""
+                    console.print("[dim]暂存所有变更...[/dim]")
+                    add_result = _exec_shell(
+                        "git add .", workspace_dir, config["shell_timeout"]
+                    )
+                    diff = _exec_shell(
+                        "git diff --cached",
+                        workspace_dir,
+                        config["shell_timeout"],
+                    )
+                    if "退出码" in diff and "没有" not in add_result:
+                        console.print(f"[red]git add 失败: {add_result}[/red]")
+                        continue
+                    if not diff.strip() or "退出码" in diff:
+                        console.print("[yellow]没有检测到变更，无需提交[/yellow]")
+                        continue
+                    if msg:
+                        result = _exec_shell(
+                            f'git commit -m "{msg}"',
+                            workspace_dir,
+                            config["shell_timeout"],
+                        )
+                        console.print(f"[green]{result}[/green]")
+                    else:
+                        stat = _exec_shell(
+                            "git diff --cached --stat",
+                            workspace_dir,
+                            config["shell_timeout"],
+                        )
+                        console.print(f"[cyan]变更文件:[/cyan]\n{stat}")
+                        with console.status("[yellow]AI 正在生成提交信息...[/yellow]"):
+                            ai_msg = await _generate_commit_message(
+                                http_client, config, diff
+                            )
+                        if ai_msg:
+                            console.print(
+                                f"[green]生成提交信息:[/green] [bold]{ai_msg}[/bold]"
+                            )
+                            result = _exec_shell(
+                                f'git commit -m "{ai_msg}"',
+                                workspace_dir,
+                                config["shell_timeout"],
+                            )
+                            console.print(f"[green]{result}[/green]")
+                        else:
+                            console.print(
+                                "[yellow]AI 生成失败，请输入提交信息:[/yellow]"
+                            )
+                            manual_msg = console.input(
+                                "[bold cyan]提交信息: [/bold cyan]"
+                            ).strip()
+                            if manual_msg:
+                                result = _exec_shell(
+                                    f'git commit -m "{manual_msg}"',
+                                    workspace_dir,
+                                    config["shell_timeout"],
+                                )
+                                console.print(f"[green]{result}[/green]")
+                            else:
+                                console.print("[red]提交已取消[/red]")
                     continue
                 else:
                     console.print(
