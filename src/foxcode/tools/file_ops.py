@@ -40,6 +40,37 @@ def register(agent):
             return f"错误: 读取文件失败 - {e}"
 
     @agent.tool
+    async def read_file_range(
+        ctx: RunContext[WorkspaceDeps], filename: str, start_line: int = 1, end_line: int = 0
+    ) -> str:
+        log_tool(ctx, "read_file_range", filename, f"{start_line}-{end_line or 'end'}")
+        try:
+            filepath = _resolve_safe_path(ctx.deps.workspace_dir, filename)
+        except ValueError as e:
+            return f"错误: {e}"
+        if not filepath.exists():
+            return f"错误: 文件 {filename} 不存在"
+        if not filepath.is_file():
+            return f"错误: {filename} 不是一个文件"
+        try:
+            with filepath.open("r", encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+        except Exception as e:
+            return f"错误: 读取文件失败 - {e}"
+        total = len(lines)
+        if start_line < 1:
+            start_line = 1
+        if end_line == 0 or end_line > total:
+            end_line = total
+        if start_line > total:
+            return f"错误: 起始行 {start_line} 超出文件总行数 {total}"
+        selected = lines[start_line - 1 : end_line]
+        output = "".join(selected)
+        ctx.deps.tool_tracker.add_chars(len(output))
+        header = f"[文件 {filename} 第 {start_line}-{end_line} 行 / 共 {total} 行]\n"
+        return header + output
+
+    @agent.tool
     async def create_file(
         ctx: RunContext[WorkspaceDeps], filename: str, content: str
     ) -> str:

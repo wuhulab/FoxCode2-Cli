@@ -19,6 +19,16 @@ STATUS_NAMES = {
     "web_search": "搜索中",
     "run_shell": "执行中",
     "run_file": "运行中",
+    "git_status": "Git状态中",
+    "git_diff": "Git对比中",
+    "git_log": "Git历史中",
+    "git_add": "Git添加中",
+    "git_commit": "Git提交中",
+    "git_branch": "Git分支中",
+    "git_checkout": "Git切换中",
+    "search_in_files": "搜索中",
+    "read_file_range": "读取中",
+    "fetch_url": "抓取中",
 }
 
 COUNT_LABELS = {
@@ -33,6 +43,16 @@ COUNT_LABELS = {
     "web_search": ("搜索", "search"),
     "run_shell": ("命令", "shell"),
     "run_file": ("运行", "run"),
+    "git_status": ("Git状态", "git status"),
+    "git_diff": ("Git对比", "git diff"),
+    "git_log": ("Git历史", "git log"),
+    "git_add": ("Git添加", "git add"),
+    "git_commit": ("Git提交", "git commit"),
+    "git_branch": ("Git分支", "git branch"),
+    "git_checkout": ("Git切换", "git checkout"),
+    "search_in_files": ("文件搜索", "grep"),
+    "read_file_range": ("范围读取", "read range"),
+    "fetch_url": ("抓取", "fetch"),
 }
 
 ICONS = {
@@ -47,6 +67,16 @@ ICONS = {
     "web_search": "🔍",
     "run_shell": "⚡",
     "run_file": "▶️",
+    "git_status": "🌿",
+    "git_diff": "📊",
+    "git_log": "📜",
+    "git_add": "➕",
+    "git_commit": "💾",
+    "git_branch": "🌲",
+    "git_checkout": "🔀",
+    "search_in_files": "🔎",
+    "read_file_range": "📖",
+    "fetch_url": "🌐",
 }
 
 

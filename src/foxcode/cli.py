@@ -9,6 +9,7 @@ from pydantic_ai.exceptions import (
     ModelHTTPError,
     ModelAPIError,
 )
+from pydantic_ai.usage import UsageLimits
 from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
@@ -362,6 +363,7 @@ async def main_async():
                                 prompt,
                                 message_history=all_messages,
                                 deps=deps,
+                                usage_limits=UsageLimits(request_limit=None),
                             ) as stream_result:
                                 full_text = ""
                                 async for chunk in stream_result.stream_output():
@@ -395,6 +397,7 @@ async def main_async():
                                 prompt,
                                 message_history=all_messages,
                                 deps=deps,
+                                usage_limits=UsageLimits(request_limit=None),
                             )
                         finally:
                             update_task.cancel()
