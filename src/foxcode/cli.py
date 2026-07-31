@@ -511,7 +511,7 @@ async def _run_headless(
             console.print(Markdown(plan.explanation))
 
 
-async def _run_interactive(config: dict, http_client, args):
+async def _run_interactive(config: dict, args):
     workspace_dir = config["workspace_dir"].resolve()
     workspace_dir.mkdir(parents=True, exist_ok=True)
     if not workspace_dir.is_dir():
