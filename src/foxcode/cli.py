@@ -702,6 +702,12 @@ async def main_async():
                         seen.add(cause_str)
                     cause = cause.__cause__
                 console.print(f"[red]API 错误: {detail}[/red]")
+            except (httpx.RemoteProtocolError, httpx.LocalProtocolError) as e:
+                console.print(
+                    f"[red]网络连接错误: 与 API 服务器的连接中断[/red]\n"
+                    f"  [yellow]原因: {e}[/yellow]\n"
+                    f"  [dim]提示: 请检查网络连接是否稳定，或 API 服务器是否正常运行[/dim]"
+                )
             except Exception as e:
                 console.print(f"[red]错误: {e}[/red]")
                 import traceback

@@ -60,7 +60,7 @@ def create_agent(
     )
 
     from .tools import file_ops, shell, search, undo, git, grep, fetch
-    from .tools import tree, copy_file, tests, format_code as fmt, deps
+    from .tools import tree, copy_file, tests, format as fmt, deps
 
     file_ops.register(agent)
     shell.register(agent)
