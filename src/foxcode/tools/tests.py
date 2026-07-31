@@ -2,7 +2,7 @@ import subprocess
 from pathlib import Path
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
-from . import log_tool
+from . import log_tool, permission_validator
 
 
 def _detect_test_framework(workspace_dir: Path) -> str | None:
@@ -30,9 +30,7 @@ def _detect_test_framework(workspace_dir: Path) -> str | None:
     return None
 
 
-def _run_command(
-    cwd: Path, cmd: list[str], timeout: int = 120
-) -> tuple[str, int]:
+def _run_command(cwd: Path, cmd: list[str], timeout: int = 120) -> tuple[str, int]:
     try:
         result = subprocess.run(
             cmd,
@@ -60,7 +58,7 @@ def _run_command(
 
 
 def register(agent):
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("run_tests"))
     async def run_tests(
         ctx: RunContext[WorkspaceDeps],
         framework: str = "",
@@ -73,6 +71,7 @@ def register(agent):
         workspace_dir = ctx.deps.workspace_dir
         if path:
             from .file_ops import _resolve_safe_path
+
             try:
                 target_path = _resolve_safe_path(workspace_dir, path)
                 if target_path.is_dir():

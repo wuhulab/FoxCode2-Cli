@@ -3,11 +3,11 @@ import html
 from urllib.parse import quote_plus
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
-from . import log_tool
+from . import log_tool, permission_validator
 
 
 def register(agent):
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("web_search"))
     async def web_search(
         ctx: RunContext[WorkspaceDeps], query: str, num_results: int = 5
     ) -> str:

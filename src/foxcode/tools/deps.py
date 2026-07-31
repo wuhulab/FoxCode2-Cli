@@ -2,7 +2,7 @@ import subprocess
 from pathlib import Path
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
-from . import log_tool
+from . import log_tool, permission_validator
 
 
 def _detect_package_manager(workspace_dir: Path) -> str | None:
@@ -23,9 +23,7 @@ def _detect_package_manager(workspace_dir: Path) -> str | None:
     return None
 
 
-def _run_cmd(
-    cwd: Path, cmd: list[str], timeout: int = 120
-) -> tuple[str, int]:
+def _run_cmd(cwd: Path, cmd: list[str], timeout: int = 120) -> tuple[str, int]:
     try:
         result = subprocess.run(
             cmd,
@@ -53,7 +51,7 @@ def _run_cmd(
 
 
 def register(agent):
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("install_deps"))
     async def install_deps(
         ctx: RunContext[WorkspaceDeps],
         packages: str = "",

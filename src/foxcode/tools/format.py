@@ -2,7 +2,7 @@ import subprocess
 from pathlib import Path
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
-from . import log_tool
+from . import log_tool, permission_validator
 
 
 FORMATTERS = {
@@ -21,7 +21,7 @@ FORMATTERS = {
 
 
 def register(agent):
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("format_code"))
     async def format_code(
         ctx: RunContext[WorkspaceDeps],
         filename: str = "",
@@ -33,6 +33,7 @@ def register(agent):
         workspace_dir = ctx.deps.workspace_dir
         if filename:
             from .file_ops import _resolve_safe_path
+
             try:
                 filepath = _resolve_safe_path(workspace_dir, filename)
             except ValueError as e:
@@ -69,6 +70,7 @@ def register(agent):
 
         elif directory:
             from .file_ops import _resolve_safe_path
+
             try:
                 dirpath = _resolve_safe_path(workspace_dir, directory)
             except ValueError as e:

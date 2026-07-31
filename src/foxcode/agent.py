@@ -1,15 +1,34 @@
-from pydantic_ai import Agent
+from pathlib import Path
+from typing import Any
+
+import httpx
+from pydantic_ai import Agent, RunContext
+from pydantic_ai.capabilities import PrepareTools
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.settings import ModelSettings
+from pydantic_ai.tools import ToolDefinition
+
 from .models import ActionPlan, WorkspaceDeps
-import httpx
+from .permissions import is_write_tool
+
+
+async def _prepare_main_tools(
+    ctx: RunContext[WorkspaceDeps], tool_defs: list[ToolDefinition]
+) -> list[ToolDefinition]:
+    """计划模式下隐藏写/执行类工具，模型只能探索并给出方案。"""
+    if ctx.deps.plan_mode:
+        return [td for td in tool_defs if not is_write_tool(td.name)]
+    return tool_defs
 
 
 def create_agent(
     config: dict,
     http_client: httpx.AsyncClient | None = None,
     project_instructions: str = "",
+    mcp_toolsets: list | None = None,
+    skills_list: list[tuple[str, str]] | None = None,
+    subagent_list: list[tuple[str, str]] | None = None,
 ) -> Agent[WorkspaceDeps, ActionPlan]:
     model = OpenAIChatModel(
         config["model"],
@@ -22,26 +41,8 @@ def create_agent(
 
     model_settings = ModelSettings(temperature=config["temperature"])
 
-    system_prompt = (
-        "你是一个专业的 AI 编程助手，可以帮助用户完成各种编程任务。"
-        "你可以读取、创建、编辑、删除、复制文件，执行 shell 命令，搜索网络，操作 Git，在项目中搜索文本等。"
-        "\n\n"
-        "重要规则：\n"
-        "1. 所有文件操作都已经自动在工作环境，不要再询问用户了\n"
-        "2. 在修改代码前，先使用 read_file 或 list_files 了解现有代码。\n"
-        "3. 对于大文件，优先使用 read_file_range 读取指定行范围，避免一次性加载过多内容。\n"
-        "4. 使用 write_file 时提供足够的上下文确保 old_string 唯一匹配。\n"
-        "5. 使用 write_file_complete 可覆盖整个文件。\n"
-        "6. 创建新文件使用 create_file。\n"
-        "7. 需要在项目中查找代码时，使用 search_in_files 快速定位。\n"
-        "8. 修改文件后，使用 run_shell 或 run_file 测试代码。\n"
-        "9. 如果操作出错，可以使用 undo_last 撤销。\n"
-        "10. 查看目录结构时优先使用 tree，比 list_files 更直观。\n"
-        "11. 需要运行测试时使用 run_tests，支持自动检测 pytest/npm/go/cargo 等框架。\n"
-        "12. 需要格式化代码时使用 format_code，支持 Python/JS/TS/Go/Rust 等。\n"
-        "13. 需要安装依赖时使用 install_deps，支持 pip/npm/cargo/go 等。\n"
-        "14. 每次操作后，在 ActionPlan 中清晰说明做了什么、修改了哪些文件。"
-    )
+    prompt_file = Path(__file__).parent / "system_prompt.md"
+    system_prompt = prompt_file.read_text(encoding="utf-8").strip()
 
     if project_instructions:
         system_prompt += (
@@ -51,28 +52,66 @@ def create_agent(
             f"{project_instructions}"
         )
 
+    if skills_list:
+        lines = ["\n\n---\n## 可用 Skills（用 list_skills / use_skill 按需获取内容）"]
+        for name, desc in skills_list:
+            lines.append(f"- {name}: {desc}")
+        system_prompt += "\n".join(lines)
+
+    if subagent_list:
+        lines = ["\n\n---\n## 可用子代理（用 task 工具指定 agent 参数调用）"]
+        for name, desc in subagent_list:
+            lines.append(f"- {name}: {desc}")
+        system_prompt += "\n".join(lines)
+
+    mcp_toolsets = [t.prefixed(t.id) for t in (mcp_toolsets or [])] or None
+
     agent: Agent[WorkspaceDeps, ActionPlan] = Agent(
         model,
         deps_type=WorkspaceDeps,
         output_type=ActionPlan,
         system_prompt=system_prompt,
         model_settings=model_settings,
+        toolsets=mcp_toolsets,
+        capabilities=[PrepareTools(_prepare_main_tools)],
     )
 
-    from .tools import file_ops, shell, search, undo, git, grep, fetch
-    from .tools import tree, copy_file, tests, format as fmt, deps
+    from .tools import (
+        copy_file,
+        deps,
+        fetch,
+        file_ops,
+        format as fmt,
+        git,
+        grep,
+        search,
+        shell,
+        tests,
+        tree,
+        undo,
+    )
+    from .tools import mode
 
-    file_ops.register(agent)
-    shell.register(agent)
-    search.register(agent)
-    undo.register(agent)
-    git.register(agent)
-    grep.register(agent)
-    fetch.register(agent)
-    tree.register(agent)
-    copy_file.register(agent)
-    tests.register(agent)
-    fmt.register(agent)
-    deps.register(agent)
+    for mod in (
+        file_ops,
+        shell,
+        search,
+        undo,
+        git,
+        grep,
+        fetch,
+        tree,
+        copy_file,
+        tests,
+        fmt,
+        deps,
+        mode,
+    ):
+        mod.register(agent)
+
+    from . import skills, subagents
+
+    skills.register(agent)
+    subagents.register(agent)
 
     return agent

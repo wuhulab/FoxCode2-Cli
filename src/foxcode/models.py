@@ -1,7 +1,7 @@
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from pydantic import BaseModel
 import httpx
 from rich.console import Console
@@ -93,6 +93,7 @@ COUNT_LABELS = {
     "read_file_range": ("范围读取", "read range"),
     "fetch_url": ("抓取", "fetch"),
 }
+
 
 class ActionPlan(BaseModel):
     explanation: str
@@ -187,6 +188,8 @@ class ToolTracker:
     cumulative_output_tokens: int = 0
     session_cost: float = 0.0
     session_requests: int = 0
+    paused: bool = False
+    status: Any = None
 
     def reset(self):
         self._counts.clear()
@@ -273,3 +276,9 @@ class WorkspaceDeps:
     tool_tracker: ToolTracker = field(default_factory=ToolTracker)
     shell_timeout: int = 30
     project_instructions: str = ""
+    permissions: Any = None
+    plan_mode: bool = False
+    skills: Any = None
+    subagents: Any = None
+    mcp_toolsets: Any = None
+    config: dict = field(default_factory=dict)

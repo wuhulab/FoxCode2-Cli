@@ -2,7 +2,7 @@ import subprocess
 from pathlib import Path
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
-from . import log_tool
+from . import log_tool, permission_validator
 
 
 def _run_git(cwd: Path, *args: str, timeout: int = 30) -> str:
@@ -35,12 +35,12 @@ def _run_git(cwd: Path, *args: str, timeout: int = 30) -> str:
 
 
 def register(agent):
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("git_status"))
     async def git_status(ctx: RunContext[WorkspaceDeps]) -> str:
         log_tool(ctx, "git_status")
         return _run_git(ctx.deps.workspace_dir, "status", "--short", "--branch")
 
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("git_diff"))
     async def git_diff(
         ctx: RunContext[WorkspaceDeps], filename: str = "", staged: bool = False
     ) -> str:
@@ -53,7 +53,7 @@ def register(agent):
             args.append(filename)
         return _run_git(ctx.deps.workspace_dir, *args)
 
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("git_log"))
     async def git_log(
         ctx: RunContext[WorkspaceDeps], n: int = 10, filename: str = ""
     ) -> str:
@@ -64,10 +64,8 @@ def register(agent):
             args.append(filename)
         return _run_git(ctx.deps.workspace_dir, *args)
 
-    @agent.tool
-    async def git_add(
-        ctx: RunContext[WorkspaceDeps], filename: str = ""
-    ) -> str:
+    @agent.tool(args_validator=permission_validator("git_add"))
+    async def git_add(ctx: RunContext[WorkspaceDeps], filename: str = "") -> str:
         target = filename or "."
         log_tool(ctx, "git_add", target)
         args = ["add"]
@@ -77,22 +75,22 @@ def register(agent):
             args.append(".")
         return _run_git(ctx.deps.workspace_dir, *args)
 
-    @agent.tool
-    async def git_commit(
-        ctx: RunContext[WorkspaceDeps], message: str = ""
-    ) -> str:
-        log_tool(ctx, "git_commit", message[:40] + "..." if len(message) > 40 else message)
+    @agent.tool(args_validator=permission_validator("git_commit"))
+    async def git_commit(ctx: RunContext[WorkspaceDeps], message: str = "") -> str:
+        log_tool(
+            ctx, "git_commit", message[:40] + "..." if len(message) > 40 else message
+        )
         if not message:
             return "错误: 提交信息不能为空"
         args = ["commit", "-m", message]
         return _run_git(ctx.deps.workspace_dir, *args)
 
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("git_branch"))
     async def git_branch(ctx: RunContext[WorkspaceDeps]) -> str:
         log_tool(ctx, "git_branch")
         return _run_git(ctx.deps.workspace_dir, "branch", "-a")
 
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("git_checkout"))
     async def git_checkout(
         ctx: RunContext[WorkspaceDeps], branch: str = "", create: bool = False
     ) -> str:

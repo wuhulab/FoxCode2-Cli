@@ -3,12 +3,12 @@ import sys
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
 from ..tools.file_ops import _resolve_safe_path
-from . import log_tool
+from . import log_tool, permission_validator
 from .security import check_shell_security, format_security_warnings
 
 
 def register(agent):
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("run_shell"))
     async def run_shell(ctx: RunContext[WorkspaceDeps], command: str) -> str:
         cmd_preview = command[:60] + "..." if len(command) > 60 else command
         log_tool(ctx, "run_shell", cmd_preview)
@@ -43,7 +43,7 @@ def register(agent):
         except Exception as e:
             return f"错误: 命令执行失败 - {e}"
 
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("run_file"))
     async def run_file(ctx: RunContext[WorkspaceDeps], filename: str) -> str:
         log_tool(ctx, "run_file", filename)
         try:

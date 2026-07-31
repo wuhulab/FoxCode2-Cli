@@ -3,12 +3,14 @@ import html
 from urllib.parse import urlparse
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
-from . import log_tool
+from . import log_tool, permission_validator
 
 
 def _clean_html(text: str) -> str:
     """简单清理 HTML 标签和实体。"""
-    text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(
+        r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL | re.IGNORECASE
+    )
     text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r"<[^>]+>", "", text)
     text = html.unescape(text)
@@ -17,7 +19,7 @@ def _clean_html(text: str) -> str:
 
 
 def register(agent):
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("fetch_url"))
     async def fetch_url(
         ctx: RunContext[WorkspaceDeps], url: str, max_length: int = 8000
     ) -> str:

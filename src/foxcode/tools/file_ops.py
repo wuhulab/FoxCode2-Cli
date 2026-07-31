@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
-from . import log_tool
+from . import log_tool, permission_validator
 from .security import check_content_security, format_security_warnings
 
 
@@ -29,7 +29,7 @@ def _warn_security(ctx: RunContext[WorkspaceDeps], content: str):
 
 
 def register(agent):
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("read_file"))
     async def read_file(ctx: RunContext[WorkspaceDeps], filename: str) -> str:
         log_tool(ctx, "read_file", filename)
         try:
@@ -47,7 +47,7 @@ def register(agent):
         except Exception as e:
             return f"错误: 读取文件失败 - {e}"
 
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("read_file_range"))
     async def read_file_range(
         ctx: RunContext[WorkspaceDeps],
         filename: str,
@@ -81,7 +81,7 @@ def register(agent):
         header = f"[文件 {filename} 第 {start_line}-{end_line} 行 / 共 {total} 行]\n"
         return header + output
 
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("create_file"))
     async def create_file(
         ctx: RunContext[WorkspaceDeps], filename: str, content: str
     ) -> str:
@@ -102,7 +102,7 @@ def register(agent):
         except Exception as e:
             return f"错误: 创建文件失败 - {e}"
 
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("write_file"))
     async def write_file(
         ctx: RunContext[WorkspaceDeps], filename: str, old_string: str, new_string: str
     ) -> str:
@@ -132,7 +132,7 @@ def register(agent):
         ctx.deps.tool_tracker.add_chars(len(new_content))
         return f"已更新 {filename}"
 
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("write_file_complete"))
     async def write_file_complete(
         ctx: RunContext[WorkspaceDeps], filename: str, content: str
     ) -> str:
@@ -156,7 +156,7 @@ def register(agent):
         ctx.deps.tool_tracker.add_chars(len(content))
         return f"已覆盖写入 {filename}"
 
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("append_file"))
     async def append_file(
         ctx: RunContext[WorkspaceDeps], filename: str, content: str
     ) -> str:
@@ -181,7 +181,7 @@ def register(agent):
         ctx.deps.tool_tracker.add_chars(len(content))
         return f"已追加内容到 {filename}"
 
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("delete_file"))
     async def delete_file(ctx: RunContext[WorkspaceDeps], filename: str) -> str:
         log_tool(ctx, "delete_file", filename)
         try:
@@ -203,7 +203,7 @@ def register(agent):
         ctx.deps.undo_manager.record("delete", filename, old_content=old_content)
         return f"已删除文件 {filename}"
 
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("rename_file"))
     async def rename_file(
         ctx: RunContext[WorkspaceDeps], old_filename: str, new_filename: str
     ) -> str:
@@ -224,7 +224,7 @@ def register(agent):
         ctx.deps.undo_manager.record("rename", new_filename, old_content=old_filename)
         return f"已重命名 {old_filename} -> {new_filename}"
 
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("list_files"))
     async def list_files(ctx: RunContext[WorkspaceDeps], path: str = "") -> str:
         log_tool(ctx, "list_files", path or ".")
         try:

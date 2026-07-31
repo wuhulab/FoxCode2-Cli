@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
-from . import log_tool
+from . import log_tool, permission_validator
 
 
 def _run_ripgrep(
@@ -120,7 +120,7 @@ def _python_grep(
 
 
 def register(agent):
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("search_in_files"))
     async def search_in_files(
         ctx: RunContext[WorkspaceDeps],
         pattern: str,

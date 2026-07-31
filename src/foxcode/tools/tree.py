@@ -1,7 +1,7 @@
 from pathlib import Path
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
-from . import log_tool
+from . import log_tool, permission_validator
 
 
 def _build_tree(
@@ -83,7 +83,7 @@ def _build_tree(
 
 
 def register(agent):
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("tree"))
     async def tree(
         ctx: RunContext[WorkspaceDeps],
         path: str = "",
@@ -95,6 +95,7 @@ def register(agent):
         if path:
             try:
                 from .file_ops import _resolve_safe_path
+
                 search_path = _resolve_safe_path(ctx.deps.workspace_dir, path)
             except ValueError as e:
                 return f"错误: {e}"

@@ -1,12 +1,12 @@
 from pathlib import Path
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
-from . import log_tool
+from . import log_tool, permission_validator
 from .file_ops import _resolve_safe_path
 
 
 def register(agent):
-    @agent.tool
+    @agent.tool(args_validator=permission_validator("copy_file"))
     async def copy_file(
         ctx: RunContext[WorkspaceDeps],
         source: str,
@@ -24,6 +24,7 @@ def register(agent):
             return f"错误: 目标文件 {destination} 已存在"
         try:
             import shutil
+
             if src.is_dir():
                 shutil.copytree(src, dst)
                 return f"已复制目录 {source} -> {destination}"

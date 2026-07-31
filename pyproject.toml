@@ -1,6 +1,6 @@
 [project]
 name = "foxcode"
-version = "0.3.0"
+version = "0.4.0"
 description = "AI 编码代理工具 - 智能编程助手"
 requires-python = ">=3.11"
 dependencies = [
@@ -8,6 +8,7 @@ dependencies = [
     "httpx>=0.28.0",
     "python-dotenv>=1.0.0",
     "rich>=13.0.0",
+    "PyYAML>=6.0",
 ]
 
 [build-system]
@@ -16,6 +17,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+foxcode = ["*.md"]
 
 [project.scripts]
 foxcode = "foxcode.cli:main"
