@@ -94,36 +94,6 @@ COUNT_LABELS = {
     "fetch_url": ("抓取", "fetch"),
 }
 
-ICONS = {
-    "read_file": "📖",
-    "create_file": "📄",
-    "write_file": "✏️",
-    "write_file_complete": "📝",
-    "append_file": "➕",
-    "delete_file": "🗑️",
-    "rename_file": "🔀",
-    "copy_file": "📋",
-    "list_files": "📂",
-    "tree": "🌳",
-    "web_search": "🔍",
-    "run_shell": "⚡",
-    "run_file": "▶️",
-    "run_tests": "🧪",
-    "format_code": "🎨",
-    "install_deps": "📦",
-    "git_status": "🌿",
-    "git_diff": "📊",
-    "git_log": "📜",
-    "git_add": "➕",
-    "git_commit": "💾",
-    "git_branch": "🌲",
-    "git_checkout": "🔀",
-    "search_in_files": "🔎",
-    "read_file_range": "📖",
-    "fetch_url": "🌐",
-}
-
-
 class ActionPlan(BaseModel):
     explanation: str
     files_modified: list[str] = []
@@ -265,12 +235,11 @@ class ToolTracker:
 
     def status_line(self, spinner: str, lang: str = "zh") -> str:
         status = STATUS_NAMES.get(self._current_tool, "思考中")
-        icon = ICONS.get(self._current_tool, "")
         summary = self.summary_str(lang)
         if summary:
-            parts = [f"{spinner} {icon} {status} ({summary})"]
+            parts = [f"{spinner} {status} ({summary})"]
         else:
-            parts = [f"{spinner} {icon} {status}"]
+            parts = [f"{spinner} {status}"]
 
         tokens = self.estimated_tokens
         if tokens > 500:
