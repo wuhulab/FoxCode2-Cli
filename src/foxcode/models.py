@@ -77,6 +77,10 @@ STATUS_NAMES = {
     "find_references": "查找引用中",
     "get_type_info": "类型分析中",
     "get_docstring": "文档查询中",
+    "use_skill": "加载技能中",
+    "list_skills": "列出技能中",
+    "use_skill_file": "读取技能文件中",
+    "list_skill_files": "列出技能文件中",
 }
 
 COUNT_LABELS = {
@@ -120,6 +124,10 @@ COUNT_LABELS = {
     "find_references": ("查找引用", "find-refs"),
     "get_type_info": ("类型分析", "type-info"),
     "get_docstring": ("文档查询", "docstring"),
+    "use_skill": ("加载技能", "use-skill"),
+    "list_skills": ("列出技能", "list-skills"),
+    "use_skill_file": ("读取技能文件", "use-skill-file"),
+    "list_skill_files": ("列出技能文件", "list-skill-files"),
 }
 
 

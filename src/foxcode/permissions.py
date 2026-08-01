@@ -22,6 +22,8 @@ READ_ONLY_TOOLS = frozenset(
         "show_history",
         "use_skill",
         "list_skills",
+        "list_skill_files",
+        "use_skill_file",
         "task",
         "enter_plan_mode",
         "exit_plan_mode",

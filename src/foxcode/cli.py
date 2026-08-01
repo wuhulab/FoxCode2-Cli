@@ -554,6 +554,16 @@ def _build_managers(config: dict):
 
     skills_mgr = SkillsManager(workspace_dir / ".foxcode" / "skills")
     skills_mgr.load()
+
+    # 加载内置 skills（用户 skills 优先，可覆盖内置）
+    builtin_dir = Path(__file__).parent / "builtin_skills"
+    if builtin_dir.is_dir():
+        builtin_mgr = SkillsManager(builtin_dir)
+        builtin_mgr.load()
+        for name, skill in builtin_mgr.skills.items():
+            if name not in skills_mgr.skills:
+                skills_mgr.skills[name] = skill
+
     subagents_mgr = SubAgentManager(workspace_dir / ".foxcode" / "agents")
     subagents_mgr.load()
 

@@ -149,6 +149,10 @@ def test_permission_default_mode_accepts_edits():
     assert perms.check("run_shell", (), {"command": "npm install"}) is not None
 
 
+import pytest
+
+
+@pytest.mark.asyncio
 async def test_agent_tool_schema_and_validator():
     agent = create_agent(dict(CONFIG), None)
     names = sorted(t for t in agent._function_toolset.tools)

@@ -17,7 +17,7 @@
 14. 每次操作后，在 ActionPlan 中清晰说明做了什么、修改了哪些文件。
 15. 部分工具在执行前需要用户确认权限（会弹出确认提示），属于正常流程。
 16. 需要独立调查或并行检索时，使用 task 工具委派给子代理，子代理会把摘要返回给你。
-17. 遇到涉及特定领域知识或工作流时，可先用 list_skills 查看可用 skill，再用 use_skill 获取内容。
+17. 遇到涉及特定领域知识或工作流时，可先用 list_skills 查看可用 skill，再用 use_skill 获取内容。对于目录型 skill（如 novel-control-station），可用 list_skill_files 查看附属文件，再用 use_skill_file 按需读取具体参考文档。
 18. 用户要求先规划时，使用 enter_plan_mode 进入计划模式，只探索不改动，最后给出方案。
 19. 在大型项目中，优先使用 index_codebase 建立代码索引，然后用 search_symbols 快速定位相关类/函数，而不是逐文件读取。
 20. 需要深入理解某个符号的实现时，使用 get_symbol_context 获取其定义上下文。

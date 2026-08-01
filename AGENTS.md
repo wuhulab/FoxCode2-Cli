@@ -16,7 +16,9 @@ foxcode/
 ├── config.py           # 配置加载（.env + .foxcode/settings.json）
 ├── permissions.py      # 权限确认系统：allow/ask/deny 规则、高危行为拦截
 ├── session.py          # 会话管理：保存/加载/导出
-├── skills.py           # Skills 管理：可复用知识/工作流
+├── skills.py           # Skills 管理：可复用知识/工作流（支持目录型多文件 skill）
+├── builtin_skills/     # 内置 Skills（随包分发）
+│   └── novel-control-station/   # 中文长篇小说创作控制中枢
 ├── subagents.py        # 子代理管理：隔离上下文的只读探索
 ├── mcp_manager.py      # MCP 服务器加载与权限门控
 └── tools/              # AI 可用工具集
@@ -76,6 +78,13 @@ def register(agent):
 5. 在 `system_prompt.md` 中更新规则说明
 6. 更新 `README.md`
 
+### 新增内置 Skill 步骤
+
+1. 在 `builtin_skills/` 下创建目录（`<skill-name>/`），放入 `SKILL.md` 及附属文件
+2. 在 `pyproject.toml` 的 `[tool.setuptools.package-data]` 中确认包含 `builtin_skills/**/*`
+3. 更新 `AGENTS.md` 的架构图和内置清单
+4. 测试 `list_skills` 和 `use_skill` 能正常加载新 skill
+
 ### 权限系统
 
 - `READ_ONLY_TOOLS`: 只读工具自动放行
@@ -93,7 +102,7 @@ def register(agent):
 - [x] 权限系统（allow/ask/deny）
 - [x] 计划模式
 - [x] 子代理（只读）
-- [x] Skills
+- [x] Skills（支持单文件 skill 与目录型多文件 skill，内置 `novel-control-station`）
 - [x] MCP 支持
 - [x] Headless 模式
 - [x] Git 基本操作
