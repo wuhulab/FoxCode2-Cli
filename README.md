@@ -8,8 +8,16 @@
 - **命令执行**: 运行 shell 命令、执行脚本文件（支持 Python/JS/TS/Go/Rust 等）
 - **网络搜索**: 通过 Bing 搜索获取信息（无需 API Key）
 - **撤销恢复**: 支持操作撤销，避免误操作
-- **对话记忆**: 保持多轮对话上下文
-- **结构化输出**: AI 返回清晰的 ActionPlan（解释、修改文件、代码片段）
+- **对话记忆**: 保持多轮对话上下文，长对话自动智能压缩保留关键信息
+- **结构化输出**: AI 返回清晰的 ActionPlan（解释、修改文件、代码片段），支持 Thinking 过程展示
+- **代码库索引**: 自动索引项目符号（类/函数/方法），支持快速定位
+- **Web 预览**: 启动本地 HTTP 服务器预览前端项目
+- **AI 代码审查**: 自动分析变更并给出安全、风格、逻辑审查建议
+- **项目健康检查**: 检测依赖、测试、文档、配置完整性
+- **文件引用**: 在对话中用 `@文件名` 引用文件，自动注入内容
+- **自动 Git 提示**: 进入终端时自动提示未提交的变更
+- **LSP 桥接**: 基于 jedi 提供 Python 代码的跳转定义、查找引用、类型信息（需 jedi）
+- **图片理解**: 支持 Markdown 图片语法 `![alt](path)` 上传图片给 AI 分析
 - **权限确认系统**: allow / ask / deny 规则、高危行为拦截、交互式审批、只读命令自动放行
 - **计划模式**: 切换后隐藏所有写工具，AI 只读探索并先给出方案
 - **Subagents**: 通过 `.foxcode/agents/` 定义只读子代理，用 `task` 工具调用
@@ -248,6 +256,11 @@ AI 在推理过程中会自动调用以下工具：
 - `task` - 调用只读子代理（`agent` 参数指定名称）
 - `use_skill` / `list_skills` - 获取 / 列出 Skills
 - `enter_plan_mode` / `exit_plan_mode` - AI 自主进入 / 退出计划模式
+- `index_codebase` / `search_symbols` / `get_symbol_context` - 代码库索引与符号搜索
+- `start_preview` / `stop_preview` - 启动/停止本地 Web 预览服务器
+- `review_changes` - AI 代码审查，分析当前变更的潜在问题
+- `project_health` - 项目健康检查（依赖、测试、文档、配置）
+- `go_to_definition` / `find_references` / `get_type_info` / `get_docstring` - Python 代码静态分析（基于 jedi）
 - `mcp__<服务器>__<工具>` - MCP 服务器提供的工具（前缀区分来源）
 
 ## 项目结构
@@ -287,7 +300,13 @@ foxcode/
         ├── deps.py         # 依赖安装工具
         ├── undo.py         # 撤销管理工具
         ├── mode.py         # 计划模式切换工具
-        └── security.py     # 安全检测工具
+        ├── security.py     # 安全检测工具
+        ├── code_index.py   # 代码库索引工具
+        ├── multi_edit.py   # 多文件批量编辑工具
+        ├── preview.py      # Web 预览工具
+        ├── review.py       # AI 代码审查工具
+        ├── health.py       # 项目健康检查工具
+        └── lsp_bridge.py   # LSP/jedi 代码分析桥接
 ```
 
 # License

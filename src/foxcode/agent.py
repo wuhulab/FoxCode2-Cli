@@ -77,6 +77,7 @@ def create_agent(
     )
 
     from .tools import (
+        code_index,
         copy_file,
         deps,
         fetch,
@@ -91,6 +92,10 @@ def create_agent(
         undo,
     )
     from .tools import mode
+    from .tools import preview
+    from .tools import review
+    from .tools import health
+    from .tools import lsp_bridge
 
     for mod in (
         file_ops,
@@ -106,6 +111,11 @@ def create_agent(
         fmt,
         deps,
         mode,
+        code_index,
+        preview,
+        review,
+        health,
+        lsp_bridge,
     ):
         mod.register(agent)
 

@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, Sequence
 import httpx
 from httpx import AsyncHTTPTransport
 from pydantic_ai.exceptions import (
@@ -12,6 +13,7 @@ from pydantic_ai.exceptions import (
     ModelAPIError,
 )
 from pydantic_ai.usage import UsageLimits
+from pydantic_ai.messages import ImageUrl
 from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
@@ -21,6 +23,68 @@ from rich import box
 from rich.spinner import SPINNERS
 
 SPINNERS["fox"] = {"interval": 100, "frames": ["-", "/", "\\", "-"]}
+
+# prompt_toolkit 用于增强输入体验
+try:
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.completion import Completer, Completion
+    from prompt_toolkit.history import FileHistory
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.formatted_text import HTML
+
+    _PROMPT_TOOLKIT_AVAILABLE = True
+except ImportError:
+    _PROMPT_TOOLKIT_AVAILABLE = False
+    PromptSession = None
+    Completer = None
+    Completion = None
+    FileHistory = None
+
+
+class FoxCodeCompleter(Completer):
+    """命令自动补全器。"""
+
+    COMMANDS = [
+        "/help",
+        "/plan",
+        "/permissions",
+        "/mcp",
+        "/skills",
+        "/skill ",
+        "/agents",
+        "/term",
+        "/clear",
+        "/history",
+        "/usage",
+        "/session list",
+        "/session save ",
+        "/session load ",
+        "/session del ",
+        "/export ",
+        "/undo",
+        "/commit",
+        "/exit",
+        "/quit",
+    ]
+
+    def get_completions(self, document, complete_event):
+        text = document.text
+        if not text.startswith("/"):
+            return
+        for cmd in self.COMMANDS:
+            if cmd.startswith(text):
+                yield Completion(cmd, start_position=-len(text))
+
+
+class DummyPromptSession:
+    """当 prompt_toolkit 不可用时回退到 input()。"""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def prompt_async(self, prompt_text: str = "") -> str:
+        return input(prompt_text)
+
 
 from .config import load_config, load_project_config, apply_project_settings
 from .models import ActionPlan, WorkspaceDeps, UndoManager
@@ -135,7 +199,7 @@ def parse_args(argv=None):
 
 def print_welcome():
     title = Panel.fit(
-        "[bold cyan]FoxCode Cli[/bold cyan] v0.4.0\n"
+        "[bold cyan]FoxCode Cli[/bold cyan] v0.5.0\n"
         "[yellow]/help[/yellow] 查看命令  "
         "[yellow]/plan[/yellow] 计划模式  "
         "[yellow]/permissions[/yellow] 权限设置  "
@@ -180,11 +244,152 @@ def print_help():
     console.print(table)
 
 
+def _expand_file_refs(prompt: str, workspace_dir: Path) -> str:
+    """将 prompt 中的 @filename 替换为文件内容。
+
+    支持两种写法：
+    - @filename 单独一行 → 读取文件内容
+    - @filename 在行内 → 在行内插入内容说明
+    """
+    import re
+
+    def _read_file(match: re.Match) -> str:
+        filename = match.group(1).strip()
+        try:
+            from .tools.file_ops import _resolve_safe_path
+
+            filepath = _resolve_safe_path(workspace_dir, filename)
+            if filepath.is_file():
+                content = filepath.read_text(encoding="utf-8", errors="replace")
+                lines = content.splitlines()
+                if len(lines) > 60:
+                    content = "\n".join(lines[:60]) + "\n... (文件过长，仅展示前60行)"
+                return f"\n```\n{content}\n```\n"
+            return f"\n[文件不存在: {filename}]\n"
+        except Exception as e:
+            return f"\n[读取失败: {filename} - {e}]\n"
+
+    # 匹配 @filename（空格或行首/行尾分隔）
+    pattern = r"(?<![\w/])@([\w\./-]+(?:/\w[\w\./-]*)?)"
+    return re.sub(pattern, _read_file, prompt)
+
+
+def _parse_image_refs(prompt: str, workspace_dir: Path) -> str | list:
+    """解析 prompt 中的 Markdown 图片语法 ![alt](path)，提取为 ImageUrl。
+
+    返回 str（无图片）或 list[str | ImageUrl]。
+    """
+    import base64
+    import re
+
+    IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+
+    pattern = r"!\[([^\]]*)\]\(([^\)]+)\)"
+    matches = list(re.finditer(pattern, prompt))
+    if not matches:
+        return prompt
+
+    parts: list = []
+    last_end = 0
+    for m in matches:
+        alt = m.group(1)
+        img_path = m.group(2).strip()
+        # 只处理已知图片扩展名
+        if not img_path.lower().endswith(IMAGE_EXTS):
+            continue
+        try:
+            from .tools.file_ops import _resolve_safe_path
+
+            filepath = _resolve_safe_path(workspace_dir, img_path)
+            if not filepath.is_file():
+                continue
+            data = filepath.read_bytes()
+            ext = filepath.suffix.lower().lstrip(".")
+            if ext == "jpg":
+                ext = "jpeg"
+            media_type = f"image/{ext}"
+            b64 = base64.b64encode(data).decode()
+            data_url = f"data:{media_type};base64,{b64}"
+
+            # 添加图片前的文本
+            text_part = prompt[last_end : m.start()]
+            if text_part:
+                parts.append(text_part)
+            parts.append(ImageUrl(url=data_url, media_type=media_type))
+            last_end = m.end()
+        except Exception:
+            continue
+
+    # 尾部文本
+    tail = prompt[last_end:]
+    if tail:
+        parts.append(tail)
+
+    if not parts:
+        return prompt
+    return parts
+
+
+def _show_git_status_hint(workspace_dir: Path):
+    """如果有未提交的变更，自动提示。"""
+    try:
+        result = subprocess.run(
+            ["git", "status", "--short", "--branch"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            cwd=str(workspace_dir),
+        )
+        if result.returncode != 0:
+            return
+        lines = result.stdout.strip().splitlines()
+        if not lines:
+            return
+        # 第一行是分支信息
+        branch_line = lines[0] if lines else ""
+        changes = [l for l in lines[1:] if l.strip()]
+        if not changes:
+            return
+        console.print(f"[yellow]⚠ 检测到未提交变更 ({len(changes)} 个文件):[/yellow]")
+        for line in changes[:8]:
+            console.print(f"  [dim]{line}[/dim]")
+        if len(changes) > 8:
+            console.print(f"  [dim]... 及其他 {len(changes) - 8} 个文件[/dim]")
+        console.print(f"[dim]  分支: {branch_line}[/dim]\n")
+    except Exception:
+        pass
+
+
+def _extract_thinking(text: str) -> tuple[str, str]:
+    """从文本中提取 <thinking>...</thinking> 标签内容。"""
+    import re
+
+    matches = re.findall(r"<thinking>(.*?)</thinking>", text, re.DOTALL)
+    if not matches:
+        return "", text
+    thinking = "\n\n".join(m.strip() for m in matches)
+    # 移除 thinking 标签后的文本
+    cleaned = re.sub(r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned.strip())
+    return thinking, cleaned
+
+
 def print_action_plan(plan: ActionPlan, skip_explanation: bool = False):
     console.print()
     if not skip_explanation:
+        thinking, explanation = _extract_thinking(plan.explanation)
+        if thinking:
+            think_panel = Panel(
+                Markdown(thinking),
+                title="[dim]思考过程[/dim]",
+                border_style="grey50",
+            )
+            console.print(think_panel)
+            console.print()
         panel = Panel(
-            Markdown(plan.explanation),
+            Markdown(explanation or plan.explanation),
             title="[bold green]AI 响应[/bold green]",
             border_style="green",
         )
@@ -210,6 +415,30 @@ def print_action_plan(plan: ActionPlan, skip_explanation: bool = False):
             console.print(panel)
 
     console.print()
+
+
+def _show_colored_diff(workspace_dir: Path, files: list[str]):
+    """展示有修改的文件的彩色 diff 预览。"""
+    import difflib
+
+    if not files:
+        return
+    for filename in files:
+        filepath = workspace_dir / filename
+        if not filepath.exists():
+            continue
+        # 尝试从 undo_manager 获取旧内容？不，undo_manager 不能这样直接查。
+        # 用 git diff 更通用
+    # 统一用 git diff -- 展示所有变更
+    result = _exec_shell("git diff --no-color", workspace_dir, timeout=15)
+    if not result or "退出码" in result and "没有" in result:
+        return
+    if "exit code" in result.lower() and "no changes" in result.lower():
+        return
+    # 简化为只显示修改摘要
+    stat = _exec_shell("git diff --stat", workspace_dir, timeout=10)
+    if stat and "退出码" not in stat and stat.strip():
+        console.print(f"  [dim]变更摘要:\n{stat}[/dim]")
 
 
 def run_undo(deps: WorkspaceDeps, steps: int = 1):
@@ -340,7 +569,7 @@ def _agent_lists(skills_mgr, subagents_mgr):
 
 async def _run_status_loop(
     agent,
-    prompt: str,
+    prompt: str | Sequence[Any] | None,
     all_messages: list,
     deps: WorkspaceDeps,
     config: dict,
@@ -536,6 +765,9 @@ async def _run_interactive(config: dict, args):
         console.print(f"[dim]MCP 服务器: {len(mcp_toolsets)} 个已配置[/dim]")
     console.print()
 
+    # 展示未提交的 git 变更
+    _show_git_status_hint(workspace_dir)
+
     proxy_mounts = _build_proxy_mounts(config)
 
     async with RetryClient(
@@ -576,16 +808,26 @@ async def _run_interactive(config: dict, args):
         terminal_cwd = workspace_dir
         pending_skill = None
 
+        # 初始化 prompt_toolkit session
+        history_file = workspace_dir / ".foxcode" / "history"
+        if _PROMPT_TOOLKIT_AVAILABLE and PromptSession is not None:
+            pt_session = PromptSession(
+                completer=FoxCodeCompleter(),
+                history=FileHistory(str(history_file)) if FileHistory else None,
+                multiline=False,
+            )
+        else:
+            pt_session = DummyPromptSession()
+
         async def _run_loop():
             nonlocal all_messages, terminal_mode, terminal_cwd, pending_skill
             while True:
                 try:
                     if terminal_mode:
-                        prompt = console.input(
-                            f"[bold yellow]{terminal_cwd}>[/bold yellow] "
-                        ).strip()
+                        prompt_text = f"{terminal_cwd}> "
                     else:
-                        prompt = console.input("[bold cyan]>>[/bold cyan] ").strip()
+                        prompt_text = ">> "
+                    prompt = (await pt_session.prompt_async(prompt_text)).strip()
                 except (EOFError, KeyboardInterrupt):
                     break
 
@@ -924,11 +1166,11 @@ async def _run_interactive(config: dict, args):
                     deps.tool_tracker.reset()
                     console.print("[dim]────────────────────────────────────────[/dim]")
 
-                    send_prompt = prompt
+                    send_prompt = _expand_file_refs(prompt, workspace_dir)
                     if pending_skill:
                         send_prompt = (
                             f"请先阅读以下 skill 内容并严格遵循其中的指导：\n\n"
-                            f"---\n{pending_skill}\n---\n\n{prompt}"
+                            f"---\n{pending_skill}\n---\n\n{send_prompt}"
                         )
                         pending_skill = None
                     if deps.plan_mode:
@@ -938,13 +1180,24 @@ async def _run_interactive(config: dict, args):
                             + send_prompt
                         )
 
+                    # 解析图片引用
+                    send_prompt = _parse_image_refs(send_prompt, workspace_dir)
+
                     all_messages, plan, streamed, full_text = await _run_status_loop(
                         agent, send_prompt, all_messages, deps, config
                     )
 
                     if len(all_messages) > max_history_messages:
-                        cutoff = len(all_messages) - max_history_messages
-                        all_messages = all_messages[cutoff:]
+                        from .context_compressor import compress_messages
+
+                        with console.status(
+                            "[dim]智能压缩上下文中...[/dim]", spinner="fox"
+                        ):
+                            all_messages, summary_text = await compress_messages(
+                                all_messages, http_client, config
+                            )
+                        if summary_text:
+                            console.print(f"  [dim]上下文已压缩，保留关键信息[/dim]")
 
                     summary = deps.tool_tracker.summary_str()
                     if summary:
@@ -959,6 +1212,9 @@ async def _run_interactive(config: dict, args):
                     print_action_plan(
                         plan, skip_explanation=bool(streamed and full_text)
                     )
+                    # 展示本轮变更摘要
+                    if plan.files_modified:
+                        _show_colored_diff(workspace_dir, plan.files_modified)
 
                 except UnexpectedModelBehavior as e:
                     console.print(f"[red]API 响应格式错误: {e}[/red]")
@@ -1012,7 +1268,7 @@ async def _run_interactive(config: dict, args):
 async def main_async():
     args = parse_args()
     if args.version:
-        console.print("FoxCode v0.4.0")
+        console.print("FoxCode v0.5.0")
         return
 
     config = load_config()

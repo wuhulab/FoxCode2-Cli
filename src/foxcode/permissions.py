@@ -25,6 +25,15 @@ READ_ONLY_TOOLS = frozenset(
         "task",
         "enter_plan_mode",
         "exit_plan_mode",
+        "index_codebase",
+        "search_symbols",
+        "get_symbol_context",
+        "review_changes",
+        "project_health",
+        "go_to_definition",
+        "find_references",
+        "get_type_info",
+        "get_docstring",
     }
 )
 
@@ -47,6 +56,8 @@ WRITE_TOOLS = frozenset(
         "git_commit",
         "git_checkout",
         "undo_last",
+        "start_preview",
+        "stop_preview",
     }
 )
 
@@ -211,7 +222,9 @@ class PermissionManager:
             parts.append(str(v))
         for k, v in sorted(kwargs.items()):
             parts.append(f"{k}={v}")
-        return " ".join(parts) if parts else ""
+        raw = " ".join(parts) if parts else ""
+        # 规范化空白，避免换行/多余空格导致 session_always 无法命中
+        return " ".join(raw.split())
 
     def _shell_command(self, args: tuple, kwargs: dict | None) -> str:
         kwargs = kwargs or {}
@@ -350,8 +363,10 @@ class PermissionManager:
                     .strip()
                     .lower()
                 )
-                if answer in ("y", "yes", "允许", ""):
-                    return False if answer == "" else True
+                if answer in ("y", "yes", "允许"):
+                    return True
+                if answer == "":
+                    return True
                 if answer in ("a", "always"):
                     self._session_always.add(f"{tool_name} {target}")
                     return True

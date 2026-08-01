@@ -1,6 +1,7 @@
 """冒烟测试：权限门控、计划模式、subagents、skills、MCP 配置。"""
 
 import asyncio
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -94,6 +95,27 @@ def test_permission_allow_rules():
     assert perms.check("run_shell", (), {"command": "git status"}) is None
     assert perms.check("read_file", (), {"filename": "x"}) is None
     assert perms.check("run_shell", (), {"command": "npm install"}) is not None
+
+
+def test_permission_session_always_whitespace_normalization():
+    """command 中换行/多空格差异不应导致 session_always 失效，避免重复询问。"""
+    perms = PermissionManager(headless=True)
+    perms.mode = "default"
+    # 模拟用户确认 'a' 时命令中含有换行
+    perms._session_always.add(
+        "run_shell command=python -m pip install tree-sitter tree-sitter-python 2>&1 | tail -20"
+    )
+    # 再次调用时 kwargs 中的 command 包含换行和多余空格，但逻辑相同
+    assert (
+        perms.check(
+            "run_shell",
+            (),
+            {
+                "command": "python -m pip install tree-sitter\ntree-sitter-python 2>&1 | tail -20"
+            },
+        )
+        is None
+    )
 
 
 def test_permission_session_always_stable_target():

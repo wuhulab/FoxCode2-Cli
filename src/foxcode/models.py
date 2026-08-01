@@ -66,6 +66,17 @@ STATUS_NAMES = {
     "multi_write_file": "批量编辑中",
     "apply_diff": "应用补丁中",
     "batch_create": "批量创建中",
+    "index_codebase": "索引中",
+    "search_symbols": "符号搜索中",
+    "get_symbol_context": "符号分析中",
+    "start_preview": "启动预览中",
+    "stop_preview": "停止预览中",
+    "review_changes": "代码审查中",
+    "project_health": "健康检查中",
+    "go_to_definition": "跳转定义中",
+    "find_references": "查找引用中",
+    "get_type_info": "类型分析中",
+    "get_docstring": "文档查询中",
 }
 
 COUNT_LABELS = {
@@ -98,6 +109,17 @@ COUNT_LABELS = {
     "multi_write_file": ("批量编辑", "multi-edit"),
     "apply_diff": ("应用补丁", "apply-diff"),
     "batch_create": ("批量创建", "batch-create"),
+    "index_codebase": ("索引", "index"),
+    "search_symbols": ("符号搜索", "symbol-search"),
+    "get_symbol_context": ("符号分析", "symbol-context"),
+    "start_preview": ("启动预览", "preview"),
+    "stop_preview": ("停止预览", "stop-preview"),
+    "review_changes": ("代码审查", "review"),
+    "project_health": ("健康检查", "health"),
+    "go_to_definition": ("跳转定义", "goto-def"),
+    "find_references": ("查找引用", "find-refs"),
+    "get_type_info": ("类型分析", "type-info"),
+    "get_docstring": ("文档查询", "docstring"),
 }
 
 
@@ -162,10 +184,7 @@ class UndoManager:
                 undone_groups.add(group_tag)
                 # 收集当前栈中所有同组的 entry（包括刚 pop 的这个）
                 group_entries = [entry]
-                while (
-                    self._history
-                    and self._history[-1].group_tag == group_tag
-                ):
+                while self._history and self._history[-1].group_tag == group_tag:
                     group_entries.append(self._history.pop())
 
                 for g_entry in group_entries:
@@ -177,10 +196,14 @@ class UndoManager:
                             results.append(f"撤销创建: {g_entry.file_path}")
                         elif g_entry.operation == "delete":
                             g_path.parent.mkdir(parents=True, exist_ok=True)
-                            g_path.write_text(g_entry.old_content or "", encoding="utf-8")
+                            g_path.write_text(
+                                g_entry.old_content or "", encoding="utf-8"
+                            )
                             results.append(f"撤销删除: {g_entry.file_path}")
                         elif g_entry.operation in ("write", "overwrite", "append"):
-                            g_path.write_text(g_entry.old_content or "", encoding="utf-8")
+                            g_path.write_text(
+                                g_entry.old_content or "", encoding="utf-8"
+                            )
                             results.append(f"撤销编辑: {g_entry.file_path}")
                         elif g_entry.operation == "rename":
                             src = workspace_dir / (g_entry.old_content or "")
