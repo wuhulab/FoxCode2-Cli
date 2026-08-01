@@ -63,6 +63,9 @@ STATUS_NAMES = {
     "search_in_files": "搜索中",
     "read_file_range": "读取中",
     "fetch_url": "抓取中",
+    "multi_write_file": "批量编辑中",
+    "apply_diff": "应用补丁中",
+    "batch_create": "批量创建中",
 }
 
 COUNT_LABELS = {
@@ -92,6 +95,9 @@ COUNT_LABELS = {
     "search_in_files": ("文件搜索", "grep"),
     "read_file_range": ("范围读取", "read range"),
     "fetch_url": ("抓取", "fetch"),
+    "multi_write_file": ("批量编辑", "multi-edit"),
+    "apply_diff": ("应用补丁", "apply-diff"),
+    "batch_create": ("批量创建", "batch-create"),
 }
 
 
@@ -99,6 +105,7 @@ class ActionPlan(BaseModel):
     explanation: str
     files_modified: list[str] = []
     code_snippets: list[str] = []
+    operations_detail: list[str] = []
 
 
 @dataclass
@@ -106,33 +113,91 @@ class UndoEntry:
     operation: str
     file_path: str
     old_content: Optional[str] = None
+    group_tag: Optional[str] = None
 
 
 class UndoManager:
     def __init__(self):
         self._history: list[UndoEntry] = []
+        self._active_group: Optional[str] = None
 
     def record(
         self,
         operation: str,
         file_path: str,
         old_content: Optional[str] = None,
+        group_tag: Optional[str] = None,
     ):
+        tag = group_tag or self._active_group
         self._history.append(
             UndoEntry(
                 operation=operation,
                 file_path=file_path,
                 old_content=old_content,
+                group_tag=tag,
             )
         )
+
+    def start_group(self, tag: str):
+        """开始一个组合操作组，后续 record 的 entry 会带上相同的 group_tag。"""
+        self._active_group = tag
+
+    def end_group(self):
+        """结束组合操作组。"""
+        self._active_group = None
 
     def undo(self, workspace_dir: Path, n: int = 1) -> str:
         if not self._history:
             return "没有可撤销的操作"
         results = []
-        for _ in range(min(n, len(self._history))):
+        undone_groups: set[str] = set()
+        count = 0
+        while count < n and self._history:
             entry = self._history.pop()
             full_path = workspace_dir / entry.file_path
+
+            # 如果这是组合操作的一部分，回滚整个组
+            if entry.group_tag and entry.group_tag not in undone_groups:
+                group_tag = entry.group_tag
+                undone_groups.add(group_tag)
+                # 收集当前栈中所有同组的 entry（包括刚 pop 的这个）
+                group_entries = [entry]
+                while (
+                    self._history
+                    and self._history[-1].group_tag == group_tag
+                ):
+                    group_entries.append(self._history.pop())
+
+                for g_entry in group_entries:
+                    g_path = workspace_dir / g_entry.file_path
+                    try:
+                        if g_entry.operation == "create":
+                            if g_path.exists():
+                                g_path.unlink()
+                            results.append(f"撤销创建: {g_entry.file_path}")
+                        elif g_entry.operation == "delete":
+                            g_path.parent.mkdir(parents=True, exist_ok=True)
+                            g_path.write_text(g_entry.old_content or "", encoding="utf-8")
+                            results.append(f"撤销删除: {g_entry.file_path}")
+                        elif g_entry.operation in ("write", "overwrite", "append"):
+                            g_path.write_text(g_entry.old_content or "", encoding="utf-8")
+                            results.append(f"撤销编辑: {g_entry.file_path}")
+                        elif g_entry.operation == "rename":
+                            src = workspace_dir / (g_entry.old_content or "")
+                            dst = workspace_dir / g_entry.file_path
+                            if dst.exists():
+                                dst.rename(src)
+                            results.append(
+                                f"撤销重命名: {g_entry.file_path} -> {g_entry.old_content}"
+                            )
+                    except Exception as e:
+                        self._history.append(g_entry)
+                        results.append(f"撤销失败 ({g_entry.file_path}): {e}")
+                        break
+                count += 1
+                continue
+
+            # 普通单条撤销
             try:
                 if entry.operation == "create":
                     if full_path.exists():
@@ -163,6 +228,7 @@ class UndoManager:
                 self._history.append(entry)
                 results.append(f"撤销失败 ({entry.file_path}): {e}")
                 break
+            count += 1
         return "\n".join(results) if results else "没有可撤销的操作"
 
     @property
@@ -173,8 +239,15 @@ class UndoManager:
         if not self._history:
             return "暂无操作历史"
         lines = ["操作历史:"]
+        seen_groups: set[str] = set()
         for i, entry in enumerate(reversed(self._history[-10:]), 1):
-            lines.append(f"  {i}. [{entry.operation}] {entry.file_path}")
+            if entry.group_tag:
+                if entry.group_tag in seen_groups:
+                    continue
+                seen_groups.add(entry.group_tag)
+                lines.append(f"  {i}. [组合操作] {entry.group_tag}")
+            else:
+                lines.append(f"  {i}. [{entry.operation}] {entry.file_path}")
         return "\n".join(lines)
 
 

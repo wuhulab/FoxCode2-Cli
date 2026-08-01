@@ -165,7 +165,7 @@ class PermissionManager:
     tool_tracker: Any = None  # 用于暂停状态显示
     status: Any = None  # rich Status 对象
 
-    mode: str = "default"
+    mode: str = "acceptEdits"
     plan_mode: bool = False
     headless: bool = False
     subagent_mode: bool = False
@@ -209,7 +209,7 @@ class PermissionManager:
         parts = []
         for v in args:
             parts.append(str(v))
-        for k, v in kwargs.items():
+        for k, v in sorted(kwargs.items()):
             parts.append(f"{k}={v}")
         return " ".join(parts) if parts else ""
 

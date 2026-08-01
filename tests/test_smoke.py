@@ -96,6 +96,37 @@ def test_permission_allow_rules():
     assert perms.check("run_shell", (), {"command": "npm install"}) is not None
 
 
+def test_permission_session_always_stable_target():
+    """kwargs 顺序不同也应匹配 session_always，避免重复询问。"""
+    perms = PermissionManager(headless=True)
+    perms.mode = "default"
+    # 模拟用户输入 'a'（总是允许）；target 内部已按 key 字母序稳定
+    perms._session_always.add("write_file filename=x.py new_string=b old_string=a")
+    # 下次调用时 kwargs 顺序不同，但 target 稳定，应匹配 session_always
+    assert (
+        perms.check(
+            "write_file", (), {"old_string": "a", "filename": "x.py", "new_string": "b"}
+        )
+        is None
+    )
+
+
+def test_permission_default_mode_accepts_edits():
+    """默认模式应为 acceptEdits，写文件自动放行，不再每次询问。"""
+    perms = PermissionManager(headless=True)
+    # 默认 mode 已是 acceptEdits
+    assert perms.mode == "acceptEdits"
+    assert (
+        perms.check(
+            "write_file", (), {"filename": "x.py", "old_string": "a", "new_string": "b"}
+        )
+        is None
+    )
+    assert perms.check("create_file", (), {"filename": "x.py", "content": "hi"}) is None
+    # 但 run_shell 仍需拒绝/询问（headless 下拒绝）
+    assert perms.check("run_shell", (), {"command": "npm install"}) is not None
+
+
 async def test_agent_tool_schema_and_validator():
     agent = create_agent(dict(CONFIG), None)
     names = sorted(t for t in agent._function_toolset.tools)
@@ -122,6 +153,7 @@ async def test_agent_tool_schema_and_validator():
         await v(FakeCtx(deps), command="git status")
 
         vw = permission_validator("write_file")
+        deps.permissions.mode = "default"  # 显式切回严格模式测试拒绝逻辑
         try:
             await vw(FakeCtx(deps), filename="x.py", old_string="a", new_string="b")
             raise AssertionError("headless 下写文件应拒绝")
@@ -258,6 +290,8 @@ if __name__ == "__main__":
         test_permission_plan_mode_denies_write,
         test_permission_ask_headless_denies,
         test_permission_allow_rules,
+        test_permission_session_always_stable_target,
+        test_permission_default_mode_accepts_edits,
         test_skills_loading,
         test_subagents_loading,
         test_mcp_config_discovery,
