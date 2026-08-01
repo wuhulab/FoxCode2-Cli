@@ -74,6 +74,31 @@ BUILTIN_DANGEROUS: list[tuple[str, str]] = [
     (r"\brm\s+-rf\s+(~|%USERPROFILE%)", "删除用户主目录"),
 ]
 
+# 敏感文件读取模式：匹配这些文件路径的读取操作需要确认
+_SENSITIVE_PATTERNS = [
+    r"\.env",
+    r"id_rsa",
+    r"id_ed25519",
+    r"id_ecdsa",
+    r"id_dsa",
+    r"\.pem$",
+    r"\.key$",
+    r"\.p12$",
+    r"\.pfx$",
+    r"\.htpasswd",
+    r"credentials",
+    r"secret",
+    r"token",
+    r"password",
+    r"private",
+    r"\.ssh",
+    r"\.aws",
+    r"kubeconfig",
+    r"\.dockerconfigjson",
+    r"settings\.json",
+]
+_SENSITIVE_FILE_RE = re.compile("|".join(_SENSITIVE_PATTERNS), re.IGNORECASE)
+
 # 工具分类（默认 ask 的未知工具）
 ACTION_TOOLS = WRITE_TOOLS | {"run_shell"}
 
@@ -244,6 +269,9 @@ class PermissionManager:
                 return True
         return False
 
+    def _is_sensitive_file(self, target: str) -> bool:
+        return bool(_SENSITIVE_FILE_RE.search(target))
+
     def decide(
         self, tool_name: str, target: str, args: tuple = (), kwargs: dict | None = None
     ) -> str:
@@ -295,20 +323,21 @@ class PermissionManager:
         # 6. 按模式兜底
         if self.mode == "bypass":
             return "allow"
+        # 读取敏感/危险文件需要确认
+        if tool_name in ("read_file", "read_file_range") and self._is_sensitive_file(
+            target
+        ):
+            return "ask"
         if cat == "read":
             return "allow"
         if self.mode == "acceptEdits":
-            if tool_name in WRITE_TOOLS and tool_name not in (
-                "run_shell",
-                "run_file",
-                "install_deps",
-                "run_tests",
-                "format_code",
-                "git_commit",
-                "git_checkout",
-            ):
-                return "allow"
-            return "ask"
+            # 仅保留真正危险的操作需要确认
+            if tool_name in ("run_shell", "run_file"):
+                return "ask"
+            if tool_name == "delete_file":
+                return "ask"
+            # 其他写操作、MCP 工具等全部放行
+            return "allow"
         if self.mode == "plan":
             return "deny"
         return "ask"

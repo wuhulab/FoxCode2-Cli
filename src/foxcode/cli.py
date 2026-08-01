@@ -554,7 +554,11 @@ def _build_managers(config: dict):
     subagents_mgr = SubAgentManager(workspace_dir / ".foxcode" / "agents")
     subagents_mgr.load()
 
-    mcp_toolsets = load_mcp_toolsets(workspace_dir, perms)
+    try:
+        mcp_toolsets = load_mcp_toolsets(workspace_dir, perms)
+    except Exception as e:
+        console.print(f"  [yellow]⚠ MCP 工具加载失败: {e}[/yellow]")
+        mcp_toolsets = []
 
     return config, project_config, perms, skills_mgr, subagents_mgr, mcp_toolsets
 
@@ -699,6 +703,7 @@ async def _run_headless(
             config=config,
         )
 
+        result = None
         try:
             async with agent:
                 result = await agent.run(
@@ -706,17 +711,40 @@ async def _run_headless(
                     deps=deps,
                     usage_limits=UsageLimits(request_limit=None),
                 )
-        except UnexpectedModelBehavior as e:
-            console.print(f"[red]API 响应格式错误: {e}[/red]", stderr=True)
-            return
-        except ModelHTTPError as e:
-            console.print(
-                f"[red]API HTTP 错误 ({e.status_code}) 模型={e.model_name}: {e.body or ''}[/red]",
-                stderr=True,
-            )
-            return
         except Exception as e:
-            console.print(f"[red]错误: {e}[/red]", stderr=True)
+            if mcp_toolsets:
+                console.print(f"[yellow]⚠ MCP 初始化失败: {e}[/yellow]", stderr=True)
+                console.print("[dim]  已自动禁用 MCP，继续运行...[/dim]", stderr=True)
+                agent = create_agent(
+                    config,
+                    mcp_toolsets=None,
+                    skills_list=skills_list,
+                    subagent_list=subagent_list,
+                )
+                try:
+                    async with agent:
+                        result = await agent.run(
+                            prompt.strip(),
+                            deps=deps,
+                            usage_limits=UsageLimits(request_limit=None),
+                        )
+                except UnexpectedModelBehavior as e:
+                    console.print(f"[red]API 响应格式错误: {e}[/red]", stderr=True)
+                    return
+                except ModelHTTPError as e:
+                    console.print(
+                        f"[red]API HTTP 错误 ({e.status_code}) 模型={e.model_name}: {e.body or ''}[/red]",
+                        stderr=True,
+                    )
+                    return
+                except Exception as e:
+                    console.print(f"[red]错误: {e}[/red]", stderr=True)
+                    return
+            else:
+                console.print(f"[red]错误: {e}[/red]", stderr=True)
+                return
+
+        if result is None:
             return
 
         plan = result.output
@@ -1258,9 +1286,19 @@ async def _run_interactive(config: dict, args):
                     await _run_loop()
             except Exception as e:
                 console.print(
-                    f"[red]MCP 初始化失败: {e}[/red]\n"
-                    "  [yellow]请检查 .foxcode/mcp.json 配置后重试，或删除该文件禁用 MCP[/yellow]"
+                    f"[yellow]⚠ MCP 初始化失败: {e}[/yellow]\n"
+                    "  [dim]已自动禁用 MCP，继续运行...[/dim]"
                 )
+                agent = create_agent(
+                    config,
+                    http_client,
+                    project_config["instructions"],
+                    mcp_toolsets=None,
+                    skills_list=skills_list,
+                    subagent_list=subagent_list,
+                )
+                async with agent:
+                    await _run_loop()
         else:
             await _run_loop()
 
