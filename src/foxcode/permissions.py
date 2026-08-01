@@ -205,6 +205,7 @@ class PermissionManager:
     plan_mode: bool = False
     headless: bool = False
     subagent_mode: bool = False
+    solo_mode: bool = False
 
     allow_rules: list[PermissionRule] = field(default_factory=list)
     ask_rules: list[PermissionRule] = field(default_factory=list)
@@ -314,10 +315,15 @@ class PermissionManager:
         if allowed:
             return "allow"
 
-        # 5. 只读 shell 命令自动放行
-        if tool_name == "run_shell" and self._is_readonly_shell(
-            self._shell_command(args, kwargs)
-        ):
+        # 5. 只读 shell 命令自动放行（但读取敏感文件仍需确认）
+        if tool_name == "run_shell":
+            cmd = self._shell_command(args, kwargs)
+            if self._is_readonly_shell(cmd):
+                if self._is_sensitive_file(cmd):
+                    return "ask"
+                return "allow"
+
+        if self.solo_mode:
             return "allow"
 
         # 6. 按模式兜底
@@ -427,6 +433,7 @@ class PermissionManager:
         lines = [
             f"权限模式: {self.mode}",
             f"计划模式: {'开' if self.plan_mode else '关'}",
+            f"无人值守(Solo): {'开' if self.solo_mode else '关'}",
             f"无交互(headless): {'开' if self.headless else '关'}",
         ]
         if self.deny_rules:

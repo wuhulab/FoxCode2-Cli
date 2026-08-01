@@ -47,6 +47,7 @@ class FoxCodeCompleter(Completer):
     COMMANDS = [
         "/help",
         "/plan",
+        "/solo",
         "/permissions",
         "/mcp",
         "/skills",
@@ -202,6 +203,7 @@ def print_welcome():
         "[bold cyan]FoxCode Cli[/bold cyan] v0.5.0\n"
         "[yellow]/help[/yellow] 查看命令  "
         "[yellow]/plan[/yellow] 计划模式  "
+        "[yellow]/solo[/yellow] 无人值守  "
         "[yellow]/permissions[/yellow] 权限设置  "
         "[yellow]/mcp[/yellow] MCP 服务  "
         "[yellow]/skills[/yellow] Skills  "
@@ -224,6 +226,7 @@ def print_help():
     table.add_column("说明", style="white")
     table.add_row("/help", "显示此帮助")
     table.add_row("/plan", "切换计划模式（只读探索，先出方案）")
+    table.add_row("/solo", "切换无人值守模式（自动放行，只拦截高危命令）")
     table.add_row("/permissions", "查看当前权限模式与规则")
     table.add_row("/mcp", "列出已配置的 MCP 服务器")
     table.add_row("/skills", "列出可用 Skills")
@@ -922,6 +925,14 @@ async def _run_interactive(config: dict, args):
                             f"[yellow]计划模式 {'开启' if deps.plan_mode else '关闭'}[/yellow]"
                         )
                         continue
+                    elif cmd == "/solo":
+                        perms.solo_mode = not perms.solo_mode
+                        status_text = "开启" if perms.solo_mode else "关闭"
+                        console.print(
+                            f"[yellow]无人值守(Solo)模式 {status_text}[/yellow]\n"
+                            "  [dim]高危命令仍会自动拦截，其他操作不再询问[/dim]"
+                        )
+                        continue
                     elif cmd == "/permissions":
                         console.print(f"[cyan]{perms.summary()}[/cyan]")
                         continue
@@ -1268,6 +1279,13 @@ async def _run_interactive(config: dict, args):
                             seen.add(cause_str)
                         cause = cause.__cause__
                     console.print(f"[red]API 错误: {detail}[/red]")
+                except (httpx.ReadTimeout, httpx.ReadError) as e:
+                    console.print(
+                        f"[red]读取超时: 与服务器的连接读取数据超时[/red]\n"
+                        f"  [yellow]原因: {e}[/yellow]\n"
+                        f"  [dim]提示: 可在 .foxcode/settings.json 中调大 request_timeout[/dim]\n"
+                        f"  [dim]或关闭流式输出: 设置 stream_output 为 false[/dim]"
+                    )
                 except (httpx.RemoteProtocolError, httpx.LocalProtocolError) as e:
                     console.print(
                         f"[red]网络连接错误: 与 API 服务器的连接中断[/red]\n"
