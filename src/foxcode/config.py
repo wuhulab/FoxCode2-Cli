@@ -53,7 +53,14 @@ def apply_project_settings(config: dict, project_config: dict) -> dict:
     if not settings:
         return config
     config = dict(config)
-    for key in ("model", "temperature", "shell_timeout", "request_timeout"):
+    for key in (
+        "model",
+        "base_url",
+        "api_key",
+        "temperature",
+        "shell_timeout",
+        "request_timeout",
+    ):
         if key in settings:
             config[key] = settings[key]
     if "stream_output" in settings:

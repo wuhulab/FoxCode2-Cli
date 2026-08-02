@@ -45,36 +45,37 @@ class FoxCodeCompleter(Completer):
     """命令自动补全器。"""
 
     COMMANDS = [
-        "/help",
-        "/plan",
-        "/solo",
-        "/permissions",
-        "/mcp",
-        "/skills",
-        "/skill ",
-        "/agents",
-        "/term",
-        "/clear",
-        "/history",
-        "/usage",
-        "/session list",
-        "/session save ",
-        "/session load ",
-        "/session del ",
-        "/export ",
-        "/undo",
-        "/commit",
-        "/exit",
-        "/quit",
+        ("/help", "显示帮助"),
+        ("/plan", "切换计划模式"),
+        ("/solo", "切换无人值守模式"),
+        ("/permissions", "查看权限设置"),
+        ("/model", "配置模型参数"),
+        ("/mcp", "列出 MCP 服务器"),
+        ("/skills", "列出可用 Skills"),
+        ("/skill ", "加载指定 Skill"),
+        ("/agents", "列出可用子代理"),
+        ("/term", "切换终端模式"),
+        ("/clear", "清屏"),
+        ("/history", "显示操作历史"),
+        ("/usage", "显示用量统计"),
+        ("/session list", "列出已保存会话"),
+        ("/session save ", "保存当前会话"),
+        ("/session load ", "加载指定会话"),
+        ("/session del ", "删除指定会话"),
+        ("/export ", "导出会话为 Markdown"),
+        ("/undo", "撤销最近操作"),
+        ("/commit", "智能提交 Git 变更"),
+        ("/exit", "退出程序"),
+        ("/quit", "退出程序"),
     ]
 
     def get_completions(self, document, complete_event):
         text = document.text
         if not text.startswith("/"):
             return
-        for cmd in self.COMMANDS:
+        for cmd, desc in self.COMMANDS:
             if cmd.startswith(text):
-                yield Completion(cmd, start_position=-len(text))
+                yield Completion(cmd, start_position=-len(text), display_meta=desc)
 
 
 class DummyPromptSession:
@@ -228,6 +229,7 @@ def print_help():
     table.add_row("/plan", "切换计划模式（只读探索，先出方案）")
     table.add_row("/solo", "切换无人值守模式（自动放行，只拦截高危命令）")
     table.add_row("/permissions", "查看当前权限模式与规则")
+    table.add_row("/model", "配置模型参数（兼容 OpenAI URL 格式）")
     table.add_row("/mcp", "列出已配置的 MCP 服务器")
     table.add_row("/skills", "列出可用 Skills")
     table.add_row("/skill <名称>", "将指定 Skill 内容注入下一条提示")
@@ -945,6 +947,58 @@ async def _run_interactive(config: dict, args):
                         continue
                     elif cmd == "/permissions":
                         console.print(f"[cyan]{perms.summary()}[/cyan]")
+                        continue
+                    elif cmd == "/model":
+                        console.print(
+                            "[dim]兼容 openai-url 配置，直接回车保留原参数[/dim]"
+                        )
+                        new_url = console.input(
+                            f"[bold cyan]API URL [/bold cyan][dim]({config.get('base_url', '')})[/dim]: "
+                        ).strip()
+                        new_key = console.input(
+                            "[bold cyan]API Key [/bold cyan][dim](留空保留原值)[/dim]: "
+                        ).strip()
+                        new_model = console.input(
+                            f"[bold cyan]模型名称 [/bold cyan][dim]({config.get('model', '')})[/dim]: "
+                        ).strip()
+
+                        settings_path = workspace_dir / ".foxcode" / "settings.json"
+                        try:
+                            if settings_path.exists():
+                                settings = json.loads(
+                                    settings_path.read_text(encoding="utf-8")
+                                )
+                            else:
+                                settings = {}
+                        except Exception:
+                            settings = {}
+
+                        updated = False
+                        if new_url:
+                            config["base_url"] = new_url
+                            settings["base_url"] = new_url
+                            updated = True
+                        if new_key:
+                            config["api_key"] = new_key
+                            settings["api_key"] = new_key
+                            updated = True
+                        if new_model:
+                            config["model"] = new_model
+                            settings["model"] = new_model
+                            updated = True
+
+                        if updated:
+                            try:
+                                settings_path.parent.mkdir(parents=True, exist_ok=True)
+                                settings_path.write_text(
+                                    json.dumps(settings, ensure_ascii=False, indent=2),
+                                    encoding="utf-8",
+                                )
+                                console.print("[green]已保存模型配置[/green]")
+                            except Exception as e:
+                                console.print(f"[red]保存失败: {e}[/red]")
+                        else:
+                            console.print("[dim]未修改任何参数[/dim]")
                         continue
                     elif cmd == "/mcp":
                         if mcp_toolsets:
