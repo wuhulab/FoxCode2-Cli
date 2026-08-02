@@ -21,7 +21,8 @@ foxcode/
 │   └── novel-control-station/   # 中文长篇小说创作控制中枢
 ├── subagents.py        # 子代理管理：隔离上下文的只读探索
 ├── mcp_manager.py      # MCP 服务器加载与权限门控
-└── tools/              # AI 可用工具集
+├── tools/              # AI 可用工具集
+└── vscode-extension/   # VS Code 插件（一键右侧启动 foxcode）
     ├── __init__.py     # 工具注册辅助函数
     ├── file_ops.py     # 文件操作：读、写、创建、删除、重命名、追加、范围读取
     ├── shell.py        # 命令执行：shell、脚本文件运行
@@ -128,11 +129,12 @@ def register(agent):
 - [x] AI 代码审查（review_changes）
 - [x] 项目健康检查（project_health）
 - [x] LSP 集成（基于 jedi） - 跳转定义、查找引用、类型信息
-- [x] 图片理解（Markdown 图片语法 `![alt](path)` 上传图片）
+- [x] IDE 插件（VSCode）
 
-### 待补充 🚧
-
-- [ ] IDE 插件（VSCode）
+├── vscode-extension/   # VS Code 插件
+│   ├── package.json
+│   ├── extension.js
+│   └── README.md
 
 ## 构建与测试
 

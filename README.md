@@ -18,6 +18,7 @@
 - **自动 Git 提示**: 进入终端时自动提示未提交的变更
 - **LSP 桥接**: 基于 jedi 提供 Python 代码的跳转定义、查找引用、类型信息（需 jedi）
 - **图片理解**: 支持 Markdown 图片语法 `![alt](path)` 上传图片给 AI 分析
+- **VS Code 扩展**: 一键在 VS Code 中启动 foxcode 终端
 - **权限确认系统**: allow / ask / deny 规则、高危行为拦截、交互式审批、只读命令自动放行
 - **计划模式**: 切换后隐藏所有写工具，AI 只读探索并先给出方案
 - **Subagents**: 通过 `.foxcode/agents/` 定义只读子代理，用 `task` 工具调用
@@ -262,6 +263,19 @@ AI 在推理过程中会自动调用以下工具：
 - `project_health` - 项目健康检查（依赖、测试、文档、配置）
 - `go_to_definition` / `find_references` / `get_type_info` / `get_docstring` - Python 代码静态分析（基于 jedi）
 - `mcp__<服务器>__<工具>` - MCP 服务器提供的工具（前缀区分来源）
+
+## VS Code 扩展
+
+在 `vscode-extension/` 目录提供了轻量扩展，支持一键在 VS Code 中启动 foxcode：
+
+```powershell
+# 打包并安装
+cd vscode-extension
+npx @vscode/vsce package --no-dependencies
+code --install-extension foxcode-0.1.0.vsix
+```
+
+安装后按 `Ctrl+Shift+P` 输入 **FoxCode: Start in Right Terminal** 即可在右侧终端启动 foxcode。
 
 ## 项目结构
 
