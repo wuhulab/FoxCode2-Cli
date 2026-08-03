@@ -392,14 +392,18 @@ class PermissionManager:
             if preview:
                 self.console.print(f"[dim]{preview}[/dim]")
             while True:
-                answer = (
-                    self.console.input(
-                        "[yellow]允许此操作? [/yellow][cyan]y[/cyan]是 / "
-                        "[cyan]n[/cyan]否 / [cyan]a[/cyan]本次会话总是允许: "
+                try:
+                    answer = (
+                        self.console.input(
+                            "[yellow]允许此操作? [/yellow][cyan]y[/cyan]是 / "
+                            "[cyan]n[/cyan]否 / [cyan]a[/cyan]本次会话总是允许: "
+                        )
+                        .strip()
+                        .lower()
                     )
-                    .strip()
-                    .lower()
-                )
+                except EOFError:
+                    self.console.print("[dim]输入流已关闭，操作已拒绝[/dim]")
+                    return False
                 if answer in ("y", "yes", "允许"):
                     return True
                 if answer == "":
