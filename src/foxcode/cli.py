@@ -381,7 +381,7 @@ def _show_git_status_hint(workspace_dir: Path):
         changes = [l for l in lines[1:] if l.strip()]
         if not changes:
             return
-        console.print(f"[yellow]⚠ 检测到未提交变更 ({len(changes)} 个文件):[/yellow]")
+        console.print(f"[yellow]检测到未提交变更 ({len(changes)} 个文件):[/yellow]")
         for line in changes[:8]:
             console.print(f"  [dim]{line}[/dim]")
         if len(changes) > 8:
@@ -666,7 +666,7 @@ async def _run_with_narration(
             if narration:
                 _pause_status_live()
                 console.print()
-                console.print(Markdown(narration))
+                console.print(Markdown(narration), style="dim")
                 _resume_status_live()
         result = agent_run.result
     all_messages = result.all_messages()

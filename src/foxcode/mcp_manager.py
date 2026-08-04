@@ -5,8 +5,11 @@ import re
 from pathlib import Path
 from typing import Any
 
+from rich.console import Console
 from pydantic_ai.exceptions import ToolFailed
 from pydantic_ai.mcp import MCPToolset, StdioTransport
+
+console = Console()
 
 _ENV_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 
@@ -64,7 +67,7 @@ def load_mcp_toolsets(workspace_dir: Path, permissions) -> list[MCPToolset]:
         try:
             server = _expand_env(server)
         except ValueError as e:
-            print(f"  [yellow]MCP 服务器 {name} 配置错误: {e}[/yellow]")
+            console.print(f"  [yellow]MCP 服务器 {name} 配置错误: {e}[/yellow]")
             continue
 
         async def _process(ctx, call_tool, tool_name, args):
@@ -96,8 +99,8 @@ def load_mcp_toolsets(workspace_dir: Path, permissions) -> list[MCPToolset]:
             else:
                 continue
         except Exception as e:
-            print(f"  [yellow]MCP 服务器 {name} 初始化失败: {e}[/yellow]")
+            console.print(f"  [yellow]MCP 服务器 {name} 初始化失败: {e}[/yellow]")
             continue
         toolsets.append(toolset)
-        print(f"  [dim]MCP 服务器已加载: {name}[/dim]")
+        console.print(f"[dim]MCP 服务器已加载: {name}[/dim]")
     return toolsets
