@@ -125,6 +125,7 @@ def create_subagent_agent(
         system_prompt=system_prompt,
         model_settings=model_settings,
         capabilities=capabilities,
+        retries=3,
     )
 
     from .tools import (

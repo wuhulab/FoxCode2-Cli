@@ -74,6 +74,7 @@ def create_agent(
         model_settings=model_settings,
         toolsets=mcp_toolsets,
         capabilities=[PrepareTools(_prepare_main_tools)],
+        retries=3,
     )
 
     from .tools import (

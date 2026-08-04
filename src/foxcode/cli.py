@@ -182,8 +182,32 @@ def parse_args(argv=None):
         metavar="QUERY",
         help="单次运行给定提示并退出（headless 模式）",
     )
+    parser.add_argument(
+        "query",
+        nargs="?",
+        default=None,
+        help="直接给出的提示，等价于 -p（headless 模式）",
+    )
     parser.add_argument("--cwd", default=None, help="工作目录")
     parser.add_argument("--model", default=None, help="覆盖默认模型")
+    parser.add_argument(
+        "-solo",
+        "--solo",
+        action="store_true",
+        help="无人值守模式（自动放行，只拦截高危命令）",
+    )
+    parser.add_argument(
+        "-build",
+        "--build",
+        action="store_true",
+        help="正常模式（默认，为后续功能保留）",
+    )
+    parser.add_argument(
+        "-read",
+        "--read",
+        action="store_true",
+        help="AI 只读模式（为后续功能保留）",
+    )
     parser.add_argument(
         "--output-format",
         choices=["text", "json"],
@@ -586,6 +610,77 @@ def _agent_lists(skills_mgr, subagents_mgr):
     return skills_list, subagent_list
 
 
+async def _run_with_narration(
+    agent,
+    prompt: str | Sequence[Any] | None,
+    all_messages: list,
+    deps: WorkspaceDeps,
+    config: dict,
+    status=None,
+):
+    """非流式执行 agent.iter，并在 AI 调用工具时输出其附带的话。
+
+    遍历模型响应，将 AI 在调用工具时输出的文字/思考直接打印出来，
+    便于协作开发确认 AI 没有走偏。返回 (all_messages, plan, usage)。
+    """
+    from pydantic_ai.messages import TextPart, ThinkingPart, ToolCallPart
+
+    status_paused = False
+
+    def _pause_status_live():
+        nonlocal status_paused
+        if status is not None and not status_paused:
+            try:
+                status.stop()
+            except Exception:
+                pass
+            status_paused = True
+
+    def _resume_status_live():
+        nonlocal status_paused
+        if status is not None and status_paused:
+            try:
+                status.start()
+            except Exception:
+                pass
+            status_paused = False
+
+    async with agent.iter(
+        prompt,
+        message_history=all_messages,
+        deps=deps,
+        usage_limits=UsageLimits(request_limit=None),
+    ) as agent_run:
+        async for node in agent_run:
+            response = getattr(node, "model_response", None)
+            if response is None:
+                continue
+            has_tool_calls = any(isinstance(p, ToolCallPart) for p in response.parts)
+            if not has_tool_calls:
+                continue
+            narration = "\n".join(
+                p.content
+                for p in response.parts
+                if isinstance(p, (TextPart, ThinkingPart)) and p.content
+            )
+            if narration:
+                _pause_status_live()
+                console.print()
+                console.print(Markdown(narration))
+                _resume_status_live()
+        result = agent_run.result
+    all_messages = result.all_messages()
+    plan = result.output
+    usage = result.usage
+    if usage:
+        deps.tool_tracker.record_usage(
+            usage.input_tokens or 0,
+            usage.output_tokens or 0,
+            config["model"],
+        )
+    return all_messages, plan, usage
+
+
 async def _run_status_loop(
     agent,
     prompt: str | Sequence[Any] | None,
@@ -593,7 +688,11 @@ async def _run_status_loop(
     deps: WorkspaceDeps,
     config: dict,
 ):
-    """在 console.status 内执行一次 agent.run，处理审批暂停。"""
+    """在 console.status 内执行一次 agent.iter（非流式），处理审批暂停。
+
+    AI 保持非流式运行；遍历模型响应时直接输出 AI 在调用工具时附带的话，
+    便于协作开发确认，同时避免流式输出与 console.status 交错导致显示问题。
+    """
     with console.status("", spinner="fox") as status:
         deps.permissions.status = status
         deps.permissions.tool_tracker = deps.tool_tracker
@@ -612,44 +711,10 @@ async def _run_status_loop(
                 pass
 
         update_task = asyncio.create_task(status_updater())
-        streamed = False
-        full_text = ""
         try:
-            if config.get("stream_output"):
-                streamed = True
-                async with agent.run_stream(
-                    prompt,
-                    message_history=all_messages,
-                    deps=deps,
-                    usage_limits=UsageLimits(request_limit=None),
-                ) as stream_result:
-                    async for chunk in stream_result.stream_output():
-                        full_text = chunk.explanation or full_text
-                all_messages = stream_result.all_messages()
-                plan = await stream_result.get_output()
-                usage = stream_result.usage
-                if usage:
-                    deps.tool_tracker.record_usage(
-                        usage.input_tokens or 0,
-                        usage.output_tokens or 0,
-                        config["model"],
-                    )
-            else:
-                result = await agent.run(
-                    prompt,
-                    message_history=all_messages,
-                    deps=deps,
-                    usage_limits=UsageLimits(request_limit=None),
-                )
-                all_messages = result.all_messages()
-                plan = result.output
-                usage = result.usage
-                if usage:
-                    deps.tool_tracker.record_usage(
-                        usage.input_tokens or 0,
-                        usage.output_tokens or 0,
-                        config["model"],
-                    )
+            all_messages, plan, usage = await _run_with_narration(
+                agent, prompt, all_messages, deps, config, status=status
+            )
         finally:
             update_task.cancel()
             try:
@@ -657,7 +722,7 @@ async def _run_status_loop(
             except asyncio.CancelledError:
                 pass
 
-    return all_messages, plan, streamed, full_text
+    return all_messages, plan
 
 
 def _save_session(session_manager: SessionManager, all_messages: list):
@@ -718,13 +783,13 @@ async def _run_headless(
             config=config,
         )
 
-        result = None
+        all_messages: list = []
+        plan = None
+        usage = None
         try:
             async with agent:
-                result = await agent.run(
-                    prompt.strip(),
-                    deps=deps,
-                    usage_limits=UsageLimits(request_limit=None),
+                all_messages, plan, usage = await _run_with_narration(
+                    agent, prompt.strip(), all_messages, deps, config
                 )
         except Exception as e:
             if mcp_toolsets:
@@ -738,10 +803,8 @@ async def _run_headless(
                 )
                 try:
                     async with agent:
-                        result = await agent.run(
-                            prompt.strip(),
-                            deps=deps,
-                            usage_limits=UsageLimits(request_limit=None),
+                        all_messages, plan, usage = await _run_with_narration(
+                            agent, prompt.strip(), all_messages, deps, config
                         )
                 except UnexpectedModelBehavior as e:
                     console.print(f"[red]API 响应格式错误: {e}[/red]", stderr=True)
@@ -759,11 +822,9 @@ async def _run_headless(
                 console.print(f"[red]错误: {e}[/red]", stderr=True)
                 return
 
-        if result is None:
+        if plan is None:
             return
 
-        plan = result.output
-        usage = result.usage
         if usage:
             deps.tool_tracker.record_usage(
                 usage.input_tokens or 0, usage.output_tokens or 0, config["model"]
@@ -797,6 +858,8 @@ async def _run_interactive(config: dict, args):
     if args.model:
         config["model"] = args.model
     perms.headless = False
+    if args.solo:
+        perms.solo_mode = True
 
     console.print(f"[dim]工作目录: {workspace_dir}[/dim]")
     console.print(f"[dim]模型: {config['model']}[/dim]")
@@ -1286,7 +1349,7 @@ async def _run_interactive(config: dict, args):
                     # 解析图片引用
                     send_prompt = _parse_image_refs(send_prompt, workspace_dir)
 
-                    all_messages, plan, streamed, full_text = await _run_status_loop(
+                    all_messages, plan = await _run_status_loop(
                         agent, send_prompt, all_messages, deps, config
                     )
 
@@ -1310,17 +1373,15 @@ async def _run_interactive(config: dict, args):
                     if usage_summary:
                         console.print(f"  [dim]用量: {usage_summary}[/dim]")
 
-                    if streamed and full_text:
-                        console.print(Markdown(full_text))
-                    print_action_plan(
-                        plan, skip_explanation=bool(streamed and full_text)
-                    )
+                    print_action_plan(plan)
                     # 展示本轮变更摘要
                     if plan.files_modified:
                         _show_colored_diff(workspace_dir, plan.files_modified)
 
                 except UnexpectedModelBehavior as e:
                     console.print(f"[red]API 响应格式错误: {e}[/red]")
+                    if e.__cause__ is not None:
+                        console.print(f"  [dim]根本原因: {e.__cause__}[/dim]")
                     console.print(
                         "  [yellow]该模型可能不完全兼容 OpenAI 格式。"
                         "请检查 API 地址、密钥是否正确，或尝试其他模型[/yellow]"
@@ -1347,8 +1408,7 @@ async def _run_interactive(config: dict, args):
                     console.print(
                         f"[red]读取超时: 与服务器的连接读取数据超时[/red]\n"
                         f"  [yellow]原因: {e}[/yellow]\n"
-                        f"  [dim]提示: 可在 .foxcode/settings.json 中调大 request_timeout[/dim]\n"
-                        f"  [dim]或关闭流式输出: 设置 stream_output 为 false[/dim]"
+                        f"  [dim]提示: 可在 .foxcode/settings.json 中调大 request_timeout[/dim]"
                     )
                 except (httpx.RemoteProtocolError, httpx.LocalProtocolError) as e:
                     console.print(
@@ -1391,6 +1451,9 @@ async def main_async():
         console.print("FoxCode v0.5.0")
         return
 
+    if args.prompt is None and args.query:
+        args.prompt = args.query
+
     config = load_config()
     if args.cwd:
         config["workspace_dir"] = Path(args.cwd).resolve()
@@ -1405,6 +1468,8 @@ async def main_async():
         config, project_config, perms, skills_mgr, subagents_mgr, mcp_toolsets = (
             _build_managers(config)
         )
+        if args.solo:
+            perms.solo_mode = True
         try:
             await _run_headless(
                 config, perms, skills_mgr, subagents_mgr, mcp_toolsets, args
