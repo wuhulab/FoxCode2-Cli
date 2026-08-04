@@ -79,11 +79,14 @@ def _format_references(refs: list) -> str:
         return "未找到引用"
     lines = []
     for r in refs:
-        file_info = (
-            f"{Path(r.module_path).relative_to(Path('.').resolve())}:{r.line}:{r.column}"
-            if r.module_path
-            else "builtin"
-        )
+        if r.module_path:
+            try:
+                rel = Path(r.module_path).relative_to(Path(".").resolve())
+            except ValueError:
+                rel = Path(r.module_path)
+            file_info = f"{rel}:{r.line}:{r.column}"
+        else:
+            file_info = "builtin"
         lines.append(f"  {file_info}")
     return f"找到 {len(refs)} 处引用:\n" + "\n".join(lines[:30])
 

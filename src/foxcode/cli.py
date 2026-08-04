@@ -508,6 +508,34 @@ def _exec_shell(command: str, cwd: Path, timeout: int = 120) -> str:
         return f"错误: 命令执行失败 - {e}"
 
 
+def _exec_shell_args(args: list[str], cwd: Path, timeout: int = 120) -> str:
+    """参数列表形式执行命令（不经 shell），避免参数内容被解释为 shell 命令。"""
+    try:
+        result = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            cwd=str(cwd),
+        )
+        output = ""
+        if result.stdout:
+            output += result.stdout.rstrip()
+        if result.stderr:
+            if output:
+                output += "\n"
+            output += f"[stderr]\n{result.stderr.rstrip()}"
+        if result.returncode != 0:
+            output += f"\n退出码: {result.returncode}"
+        return output if output else "(命令执行成功，无输出)"
+    except subprocess.TimeoutExpired:
+        return f"错误: 命令执行超时 ({timeout}秒)"
+    except Exception as e:
+        return f"错误: 命令执行失败 - {e}"
+
+
 async def _generate_commit_message(
     http_client: httpx.AsyncClient, config: dict, diff: str
 ) -> str:
@@ -1268,8 +1296,8 @@ async def _run_interactive(config: dict, args):
                             console.print("[yellow]没有检测到变更，无需提交[/yellow]")
                             continue
                         if msg:
-                            result = _exec_shell(
-                                f'git commit -m "{msg}"',
+                            result = _exec_shell_args(
+                                ["git", "commit", "-m", msg],
                                 workspace_dir,
                                 config["shell_timeout"],
                             )
@@ -1291,8 +1319,8 @@ async def _run_interactive(config: dict, args):
                                 console.print(
                                     f"[green]生成提交信息:[/green] [bold]{ai_msg}[/bold]"
                                 )
-                                result = _exec_shell(
-                                    f'git commit -m "{ai_msg}"',
+                                result = _exec_shell_args(
+                                    ["git", "commit", "-m", ai_msg],
                                     workspace_dir,
                                     config["shell_timeout"],
                                 )
@@ -1305,8 +1333,8 @@ async def _run_interactive(config: dict, args):
                                     "[bold cyan]提交信息: [/bold cyan]"
                                 ).strip()
                                 if manual_msg:
-                                    result = _exec_shell(
-                                        f'git commit -m "{manual_msg}"',
+                                    result = _exec_shell_args(
+                                        ["git", "commit", "-m", manual_msg],
                                         workspace_dir,
                                         config["shell_timeout"],
                                     )

@@ -29,8 +29,11 @@ def _run_ripgrep(
                 args.extend(["--glob", f"*{ext}"])
     args.append(pattern)
     if path:
-        target_path = (cwd / path).resolve()
-        if not str(target_path).startswith(str(cwd.resolve())):
+        try:
+            from .file_ops import _resolve_safe_path
+
+            target_path = _resolve_safe_path(cwd, path)
+        except ValueError:
             return f"错误: 路径越权 {path}"
         args.append(str(target_path).replace("\\", "/"))
     else:
@@ -76,9 +79,15 @@ def _python_grep(
     except re.error as e:
         return f"错误: 正则表达式无效 - {e}"
     cwd = cwd.resolve()
-    search_dir = (cwd / path).resolve() if path else cwd
-    if not str(search_dir).startswith(str(cwd)):
-        return f"错误: 路径越权 {path}"
+    if path:
+        try:
+            from .file_ops import _resolve_safe_path
+
+            search_dir = _resolve_safe_path(cwd, path)
+        except ValueError:
+            return f"错误: 路径越权 {path}"
+    else:
+        search_dir = cwd
 
     exts = []
     if file_extension:
