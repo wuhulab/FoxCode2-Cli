@@ -89,6 +89,11 @@ def load_config():
     except ValueError:
         request_timeout = 120
 
+    try:
+        max_context_tokens = int(os.getenv("MAX_CONTEXT_TOKENS", "100000"))
+    except ValueError:
+        max_context_tokens = 100000
+
     stream_output = os.getenv("STREAM_OUTPUT", "false").lower() in ("true", "1", "yes")
 
     return {
@@ -99,6 +104,7 @@ def load_config():
         "temperature": temperature,
         "shell_timeout": shell_timeout,
         "request_timeout": request_timeout,
+        "max_context_tokens": max_context_tokens,
         "stream_output": stream_output,
         "http_proxy": os.getenv("HTTP_PROXY") or os.getenv("http_proxy") or "",
         "https_proxy": os.getenv("HTTPS_PROXY") or os.getenv("https_proxy") or "",

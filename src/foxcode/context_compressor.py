@@ -1,6 +1,5 @@
 """智能上下文压缩：长对话自动摘要，保留关键信息减少 token 消耗。"""
 
-import json
 from typing import Any
 
 import httpx
@@ -44,6 +43,17 @@ def _extract_text(msg: Any) -> str:
         parts_text.append(str(msg))
 
     return f"[{role}]\n" + "\n".join(parts_text)
+
+
+def estimate_message_tokens(messages: list[Any]) -> int:
+    """粗略估算消息列表的总 token 数（按字符数 /4 估算）。
+
+    用于判断是否超过 MAX_CONTEXT_TOKENS 阈值，从而强制触发压缩总结。
+    """
+    total_chars = 0
+    for msg in messages:
+        total_chars += len(_extract_text(msg))
+    return total_chars // 4
 
 
 async def compress_messages(
@@ -110,11 +120,12 @@ async def compress_messages(
             f"上下文压缩失败 ({e})，已移除中间 {len(middle_chunk)} 条消息",
         )
 
-    # 构造 summary 消息——使用最简单的 dict 格式，兼容各种 message_history 实现
-    summary_msg = {
-        "role": "system",
-        "content": f"[上下文摘要] 之前对话的关键信息:\n{summary}",
-    }
+    # 构造 summary 消息——使用 pydantic-ai 的 ModelRequest 保证类型安全
+    from pydantic_ai.messages import ModelRequest, SystemPromptPart
+
+    summary_msg = ModelRequest(
+        parts=[SystemPromptPart(content=f"[上下文摘要] 之前对话的关键信息:\n{summary}")]
+    )
 
     new_messages = first_chunk + [summary_msg] + last_chunk
     return new_messages, summary
