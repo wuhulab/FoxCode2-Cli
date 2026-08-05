@@ -118,7 +118,7 @@ def register(agent):
             return f"错误: 不支持的测试框架: {detected}"
 
         output, code = _run_command(
-            ctx.deps.workspace_dir, cmd, ctx.deps.shell_timeout * 4
+            workspace_dir, cmd, ctx.deps.shell_timeout * 4
         )
         summary = f"\n[退出码: {code}]"
         if code == 0:
