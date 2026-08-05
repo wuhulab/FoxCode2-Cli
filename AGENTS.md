@@ -120,7 +120,7 @@ def register(agent):
 - [x] 用量统计
 - [x] 安全检测
 - [x] 代码库索引（code_index）- 符号索引、项目结构理解
-- [x] 智能上下文压缩 - 长对话自动摘要
+- [x] 智能上下文压缩 - 长对话自动摘要（支持 MAX_CONTEXT_TOKENS 阈值强制压缩）
 - [x] Thinking/Reasoning 展示模式
 - [x] 增强 diff 可视化（变更摘要）
 - [x] 命令行自动补全（prompt_toolkit）
@@ -131,7 +131,7 @@ def register(agent):
 - [x] 项目健康检查（project_health）
 - [x] LSP 集成（基于 jedi） - 跳转定义、查找引用、类型信息
 - [x] IDE 插件（VSCode）
-- [x] Goal 模式（/goal）- AI 完成后由独立上下文验收 AI 确认目标，未完成则继续直到达成
+- [x] Goal 模式（/goal）- AI 完成后由独立上下文验收 AI 确认目标，未完成则继续直到达成；支持 goal.md/plan.md/todo.md 持久化以抵抗上下文压缩
 
 ├── vscode-extension/   # VS Code 插件
 │   ├── package.json
