@@ -1,23 +1,14 @@
 # 整体实施计划
 
 ## 当前阶段
-所有 bug 已修复并提交，测试全部通过。
+初始阶段：运行测试，识别 bug，逐个修复并提交。
 
 ## 关键决策
-- 将工作目录中的多个未提交修复按功能模块独立提交，共 12 次提交
-- 清理了临时测试文件
-- 所有 21 个冒烟测试通过
+- 每修复一个 bug，立即提交一次 git，保持提交粒度清晰
+- 优先修复导致测试失败的 bug，再检查代码中的潜在问题
 
-## 修复清单（全部完成）
-1. [x] config.py + context_compressor.py: 添加 MAX_CONTEXT_TOKENS 支持
-2. [x] mcp_manager.py: 修复 MCP 闭包绑定问题
-3. [x] tools/code_index.py: 修复 AST 索引类方法重复问题
-4. [x] cli.py: 修复 _generate_commit_message 异常返回类型
-5. [x] models.py + tools/copy_file.py: 修复 copy 操作撤销缺失
-6. [x] tools/fetch.py: 修复 localhost SSRF 绕过
-7. [x] tools/format.py: 修复 JSON 格式化器配置
-8. [x] tools/multi_edit.py: 修复非 fuzzy 模式替换逻辑
-9. [x] tools/tests.py: 修复测试运行变量引用
-10. [x] cli.py: 修复其他交互模式问题（diff 判断、headless http_client、自定义命令匹配等）
-11. [x] 测试文件: 添加回归测试
-12. [x] 文档更新
+## 待办检查清单
+1. [ ] 运行测试，确认当前状态
+2. [ ] 检查失败测试对应的源码
+3. [ ] 修复 bug 并提交
+4. [ ] 验证所有测试通过
