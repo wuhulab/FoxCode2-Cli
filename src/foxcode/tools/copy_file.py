@@ -1,4 +1,3 @@
-from pathlib import Path
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
 from . import log_tool, permission_validator
