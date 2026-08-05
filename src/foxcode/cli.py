@@ -775,6 +775,42 @@ GOAL_PERSIST_INSTRUCTION = """你正处于 /goal 目标模式。上下文可能�
 4. 在最终回复的 ActionPlan 中，说明你更新了哪些持久化文件、当前处于什么阶段。"""
 
 
+def _track_goal_files(workspace_dir: Path, iteration: int) -> str:
+    """将 goal 持久化文件 (goal.md/plan.md/todo.md) 提交到 git 作为进度检查点。
+
+    仅当目录是 git 仓库且这些文件有变更时才提交，不影响其他工作区文件。
+    返回提交结果摘要；非 git 仓库或无变更时返回空串。
+    """
+    if not (workspace_dir / ".git").exists():
+        return ""
+    check = _exec_shell("git rev-parse --is-inside-work-tree", workspace_dir, 10)
+    if "true" not in check:
+        return ""
+    files = [
+        f for f in ("goal.md", "plan.md", "todo.md") if (workspace_dir / f).exists()
+    ]
+    if not files:
+        return ""
+    status = _exec_shell_args(
+        ["git", "status", "--short", "--"] + files, workspace_dir, 10
+    )
+    if (
+        not status.strip()
+        or "退出码" in status
+        or "没有" in status
+        or "无输出" in status
+    ):
+        return ""
+    add = _exec_shell_args(["git", "add", "--"] + files, workspace_dir, 10)
+    if "退出码" in add:
+        return ""
+    msg = f"goal: 第 {iteration} 轮进度 (goal.md/plan.md/todo.md)"
+    result = _exec_shell_args(
+        ["git", "commit", "-m", msg, "--"] + files, workspace_dir, 10
+    )
+    return result
+
+
 async def _run_goal_loop(
     agent,
     goal: str,
@@ -829,6 +865,10 @@ async def _run_goal_loop(
             f"  [bold cyan]工具调用: {deps.tool_tracker.summary_str()}[/bold cyan]"
         )
         print_action_plan(plan)
+
+        track_result = _track_goal_files(deps.workspace_dir, iteration)
+        if track_result:
+            console.print(f"  [dim]git 已追踪本轮 goal 文件: {track_result}[/dim]")
 
         console.print()
         console.print("[yellow]正在启动独立上下文验收 AI 核验目标完成情况...[/yellow]")

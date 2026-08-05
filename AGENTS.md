@@ -131,7 +131,7 @@ def register(agent):
 - [x] 项目健康检查（project_health）
 - [x] LSP 集成（基于 jedi） - 跳转定义、查找引用、类型信息
 - [x] IDE 插件（VSCode）
-- [x] Goal 模式（/goal）- AI 完成后由独立上下文验收 AI 确认目标，未完成则继续直到达成；支持 goal.md/plan.md/todo.md 持久化以抵抗上下文压缩
+- [x] Goal 模式（/goal）- AI 完成后由独立上下文验收 AI 确认目标，未完成则继续直到达成；支持 goal.md/plan.md/todo.md 持久化以抵抗上下文压缩，每轮自动 git 提交进度检查点
 
 ├── vscode-extension/   # VS Code 插件
 │   ├── package.json

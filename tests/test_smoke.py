@@ -416,6 +416,38 @@ def test_inherit_permissions_solo_mode():
         assert child_perms.check("read_file", (), {"filename": ".env.example"}) is None
 
 
+def test_track_goal_files_git_commit():
+    """_track_goal_files 应在 git 仓库中提交 goal 持久化文件。"""
+    import subprocess
+    import tempfile
+
+    from foxcode.cli import _track_goal_files
+
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        subprocess.run(["git", "init", "-q"], cwd=str(d), check=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=str(d), check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=str(d), check=True)
+        (d / "goal.md").write_text("# 目标\n", encoding="utf-8")
+
+        result = _track_goal_files(d, 1)
+        assert "goal" in result.lower() or "提交" in result
+
+        # 提交后 git log 应有一条记录
+        log = subprocess.run(
+            ["git", "log", "--oneline"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=str(d),
+        ).stdout
+        assert "goal" in log.lower()
+
+        # 无变更时再次调用应返回空串（不产生空提交）
+        assert _track_goal_files(d, 2) == ""
+
+
 def test_code_index_ast_no_duplicate_methods():
     """AST 索引不应将类方法重复添加为顶层函数。"""
     import tempfile
