@@ -21,6 +21,15 @@ from rich.text import Text
 from rich import box
 from rich.spinner import SPINNERS
 
+from .config import load_config, load_project_config, apply_project_settings
+from .models import ActionPlan, WorkspaceDeps, UndoManager
+from .agent import create_agent
+from .session import SessionManager
+from .permissions import PermissionManager
+from .skills import SkillsManager
+from .subagents import SubAgentManager
+from .mcp_manager import load_mcp_toolsets
+
 SPINNERS["fox"] = {"interval": 100, "frames": ["-", "/", "\\", "-"]}
 
 # prompt_toolkit 用于增强输入体验
@@ -85,15 +94,6 @@ class DummyPromptSession:
     async def prompt_async(self, prompt_text: str = "") -> str:
         return input(prompt_text)
 
-
-from .config import load_config, load_project_config, apply_project_settings
-from .models import ActionPlan, WorkspaceDeps, UndoManager
-from .agent import create_agent
-from .session import SessionManager
-from .permissions import PermissionManager
-from .skills import SkillsManager
-from .subagents import SubAgentManager
-from .mcp_manager import load_mcp_toolsets
 
 console = Console()
 
