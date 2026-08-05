@@ -1,7 +1,6 @@
 """多文件批量编辑工具：支持原子性 multi_write、diff 应用、批量创建。"""
 
 import difflib
-import re
 from pathlib import Path
 from typing import Optional
 
