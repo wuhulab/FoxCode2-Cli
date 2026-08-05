@@ -98,7 +98,7 @@ _FRONT_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 def _split_frontmatter(text: str) -> tuple[str | None, str]:
     m = _FRONT_RE.match(text)
     if m:
-        return m.group(1), text[m.end() :]
+        return m.group(1), text[m.end():]
     return None, text
 
 

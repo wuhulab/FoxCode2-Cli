@@ -27,7 +27,7 @@ def _fuzzy_find(content: str, old_string: str, threshold: float = 0.85) -> Optio
     best_start = -1
 
     for i in range(len(content_lines) - old_len + 1):
-        window = content_lines[i : i + old_len]
+        window = content_lines[i:i + old_len]
         ratio = difflib.SequenceMatcher(None, old_lines, window).ratio()
         if ratio > best_ratio:
             best_ratio = ratio
@@ -358,7 +358,7 @@ def _apply_patch(original: str, patch: dict, fuzzy: bool) -> tuple[str, bool, st
     best_ratio = 0.0
     best_start = -1
     for i in range(max(0, len(original_lines) - patch_len + 1)):
-        window = original_lines[i : i + patch_len]
+        window = original_lines[i:i + patch_len]
         ratio = difflib.SequenceMatcher(None, target_lines, window).ratio()
         if ratio > best_ratio:
             best_ratio = ratio
@@ -370,7 +370,7 @@ def _apply_patch(original: str, patch: dict, fuzzy: bool) -> tuple[str, bool, st
         new_lines = (
             original_lines[:best_start]
             + target_lines
-            + original_lines[best_start + patch_len :]
+            + original_lines[best_start + patch_len:]
         )
         return "\n".join(new_lines), True, f"匹配度 {best_ratio:.0%}"
 

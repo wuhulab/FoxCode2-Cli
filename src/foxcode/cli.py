@@ -342,7 +342,7 @@ def _parse_image_refs(prompt: str, workspace_dir: Path) -> str | list:
             data_url = f"data:{media_type};base64,{b64}"
 
             # 添加图片前的文本
-            text_part = prompt[last_end : m.start()]
+            text_part = prompt[last_end:m.start()]
             if text_part:
                 parts.append(text_part)
             parts.append(ImageUrl(url=data_url, media_type=media_type))

@@ -75,7 +75,7 @@ def register(agent):
             end_line = total
         if start_line > total:
             return f"错误: 起始行 {start_line} 超出文件总行数 {total}"
-        selected = lines[start_line - 1 : end_line]
+        selected = lines[start_line - 1:end_line]
         output = "".join(selected)
         ctx.deps.tool_tracker.add_chars(len(output))
         header = f"[文件 {filename} 第 {start_line}-{end_line} 行 / 共 {total} 行]\n"

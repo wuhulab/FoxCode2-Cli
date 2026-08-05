@@ -73,8 +73,8 @@ async def compress_messages(
 
     total = len(messages)
     first_chunk = messages[:KEEP_FIRST_MESSAGES]
-    middle_chunk = messages[KEEP_FIRST_MESSAGES : total - KEEP_LAST_MESSAGES]
-    last_chunk = messages[total - KEEP_LAST_MESSAGES :]
+    middle_chunk = messages[KEEP_FIRST_MESSAGES:total - KEEP_LAST_MESSAGES]
+    last_chunk = messages[total - KEEP_LAST_MESSAGES:]
 
     if not middle_chunk:
         return messages, ""

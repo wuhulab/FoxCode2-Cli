@@ -79,7 +79,7 @@ def _split_frontmatter(text: str) -> tuple[str | None, str]:
 
     m = re.match(r"^---\s*\n(.*?)\n---\s*\n", text, re.DOTALL)
     if m:
-        return m.group(1), text[m.end() :]
+        return m.group(1), text[m.end():]
     return None, text
 
 
