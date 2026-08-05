@@ -1077,6 +1077,7 @@ async def _run_interactive(config: dict, args):
 
         all_messages = []
         max_history_messages = 50
+        max_context_tokens = config.get("max_context_tokens", 100000)
 
         terminal_mode = False
         terminal_cwd = workspace_dir
@@ -1277,9 +1278,10 @@ async def _run_interactive(config: dict, args):
                         if len(parts) < 2:
                             console.print("[yellow]用法: /skill <名称>[/yellow]")
                         else:
-                            skill = skills_mgr.get(parts[1])
+                            skill_name = parts[1].strip().split()[0]
+                            skill = skills_mgr.get(skill_name)
                             if skill is None:
-                                console.print(f"[red]未找到 skill: {parts[1]}[/red]")
+                                console.print(f"[red]未找到 skill: {skill_name}[/red]")
                             else:
                                 pending_skill = skill.content
                                 console.print(
@@ -1339,15 +1341,17 @@ async def _run_interactive(config: dict, args):
                                     )
                                 console.print(table)
                         elif action == "save":
+                            raw_parts = prompt.split(maxsplit=2)
                             name = (
-                                parts[2]
-                                if len(parts) > 2
+                                raw_parts[2]
+                                if len(raw_parts) > 2
                                 else session_manager.get_auto_save_name()
                             )
                             result = session_manager.save_session(name, all_messages)
                             console.print(f"[green]{result}[/green]")
                         elif action == "load":
-                            name = parts[2] if len(parts) > 2 else ""
+                            raw_parts = prompt.split(maxsplit=2)
+                            name = raw_parts[2] if len(raw_parts) > 2 else ""
                             if not name:
                                 console.print(
                                     "[yellow]用法: /session load <名称>[/yellow]"
@@ -1363,7 +1367,8 @@ async def _run_interactive(config: dict, args):
                                         f"[green]已加载会话: {name} ({len(loaded)} 条消息)[/green]"
                                     )
                         elif action in ("del", "delete", "rm"):
-                            name = parts[2] if len(parts) > 2 else ""
+                            raw_parts = prompt.split(maxsplit=2)
+                            name = raw_parts[2] if len(raw_parts) > 2 else ""
                             if not name:
                                 console.print(
                                     "[yellow]用法: /session del <名称>[/yellow]"
@@ -1383,7 +1388,13 @@ async def _run_interactive(config: dict, args):
                             f"session_{session_manager.get_auto_save_name()}.md"
                         )
                         out_name = parts[1] if len(parts) > 1 else default_name
-                        out_path = workspace_dir / out_name
+                        try:
+                            from .tools.file_ops import _resolve_safe_path
+
+                            out_path = _resolve_safe_path(workspace_dir, out_name)
+                        except ValueError as e:
+                            console.print(f"[red]导出路径非法: {e}[/red]")
+                            continue
                         try:
                             lines = ["# FoxCode 会话导出\n"]
                             for i, msg in enumerate(all_messages, 1):
@@ -1446,10 +1457,14 @@ async def _run_interactive(config: dict, args):
                             workspace_dir,
                             config["shell_timeout"],
                         )
-                        if "退出码" in diff and "没有" not in add_result:
+                        if "退出码" in add_result and "没有" not in add_result:
                             console.print(f"[red]git add 失败: {add_result}[/red]")
                             continue
-                        if not diff.strip() or "退出码" in diff:
+                        if (
+                            not diff.strip()
+                            or "退出码" in diff
+                            or diff.strip() == "(命令执行成功，无输出)"
+                        ):
                             console.print("[yellow]没有检测到变更，无需提交[/yellow]")
                             continue
                         if msg:
@@ -1502,7 +1517,7 @@ async def _run_interactive(config: dict, args):
                     else:
                         custom_found = False
                         for cname, cprompt in project_config["commands"].items():
-                            if cmd in (f"/{cname}", f"/{cname} "):
+                            if cmd == f"/{cname}" or cmd.startswith(f"/{cname} "):
                                 prompt = cprompt
                                 console.print(f"[dim]执行自定义命令: {cname}[/dim]")
                                 custom_found = True
@@ -1538,9 +1553,15 @@ async def _run_interactive(config: dict, args):
                         agent, send_prompt, all_messages, deps, config
                     )
 
-                    if len(all_messages) > max_history_messages:
-                        from .context_compressor import compress_messages
+                    from .context_compressor import (
+                        compress_messages,
+                        estimate_message_tokens,
+                    )
 
+                    if (
+                        len(all_messages) > max_history_messages
+                        or estimate_message_tokens(all_messages) > max_context_tokens
+                    ):
                         with console.status(
                             "[dim]智能压缩上下文中...[/dim]", spinner="fox"
                         ):
