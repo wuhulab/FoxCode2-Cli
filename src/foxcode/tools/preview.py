@@ -1,7 +1,6 @@
 """Web 预览工具：启动本地 HTTP 服务器预览静态网站。"""
 
 import subprocess
-from pathlib import Path
 
 from pydantic_ai import RunContext
 
