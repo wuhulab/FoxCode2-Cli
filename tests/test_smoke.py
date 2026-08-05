@@ -394,6 +394,28 @@ async def test_goal_verifier_runs():
         assert hasattr(verif, "reason")
 
 
+def test_inherit_permissions_solo_mode():
+    """子代理/验收 AI 应继承父会话的 solo_mode，避免 /solo 后重复询问权限。"""
+    import tempfile
+
+    from foxcode.permissions import inherit_permissions
+
+    with tempfile.TemporaryDirectory() as td:
+        parent = _make_deps(Path(td))
+        parent.permissions.solo_mode = True
+        parent.permissions.headless = True
+        parent.permissions.mode = "acceptEdits"
+
+        child_perms = PermissionManager(workspace_dir=Path(td))
+        inherit_permissions(parent, child_perms)
+
+        assert child_perms.solo_mode is True
+        assert child_perms.headless is True
+        assert child_perms.mode == "acceptEdits"
+        # solo 模式下读取敏感文件也应放行，不触发询问
+        assert child_perms.check("read_file", (), {"filename": ".env.example"}) is None
+
+
 def test_code_index_ast_no_duplicate_methods():
     """AST 索引不应将类方法重复添加为顶层函数。"""
     import tempfile

@@ -6,7 +6,7 @@
 from pydantic import BaseModel, Field
 
 from .models import ToolTracker, WorkspaceDeps
-from .permissions import PermissionManager
+from .permissions import PermissionManager, inherit_permissions
 from .subagents import create_subagent_agent
 
 
@@ -42,14 +42,14 @@ def create_goal_verifier(config: dict, http_client):
 
 
 def _verifier_deps(parent: WorkspaceDeps) -> WorkspaceDeps:
-    """为验收 AI 构建隔离的只读 deps（与子代理一致，plan 模式 + 独立 tracker）。"""
+    """为验收 AI 构建隔离的只读 deps（继承父会话权限设置，避免重复询问）。"""
     perms = PermissionManager(
         console=parent.console,
         workspace_dir=parent.workspace_dir,
         tool_tracker=None,
     )
+    inherit_permissions(parent, perms)
     perms.subagent_mode = True
-    perms.mode = "plan"
     return WorkspaceDeps(
         workspace_dir=parent.workspace_dir,
         http_client=parent.http_client,

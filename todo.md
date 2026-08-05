@@ -1,0 +1,15 @@
+- [x] 运行测试并分析 bug
+- [x] 提交：添加 MAX_CONTEXT_TOKENS 环境变量支持
+- [x] 提交：修复 MCP 闭包绑定问题
+- [x] 提交：修复 AST 索引类方法重复添加问题
+- [x] 提交：修复 _generate_commit_message 异常返回 None 的问题
+- [x] 提交：修复 cli.py 中的其他交互问题
+- [x] 提交：修复 copy 操作缺失撤销记录的问题
+- [x] 提交：修复 SSRF 检查中 localhost 绕过问题
+- [x] 提交：修复 JSON 格式化器配置问题
+- [x] 提交：修复 multi_edit 非 fuzzy 模式逻辑错误
+- [x] 提交：修复 tests.py 变量引用错误
+- [x] 提交：添加回归测试
+- [x] 提交：更新文档
+- [x] 清理临时测试文件
+- [x] 验证所有测试通过

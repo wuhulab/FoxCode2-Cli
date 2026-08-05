@@ -172,8 +172,10 @@ def _child_deps(ctx: RunContext[WorkspaceDeps]) -> WorkspaceDeps:
         workspace_dir=ctx.deps.workspace_dir,
         tool_tracker=None,
     )
+    from .permissions import inherit_permissions
+
+    inherit_permissions(ctx.deps, perms)
     perms.subagent_mode = True
-    perms.mode = "plan"
     return WorkspaceDeps(
         workspace_dir=ctx.deps.workspace_dir,
         http_client=ctx.deps.http_client,

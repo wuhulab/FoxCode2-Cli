@@ -163,6 +163,24 @@ def is_write_tool(tool_name: str) -> bool:
     return _classify(tool_name) != "read"
 
 
+def inherit_permissions(parent: Any, perms: "PermissionManager") -> None:
+    """从父会话复制权限相关设置到子（子代理/验收 AI），避免重复询问。
+
+    parent 为 WorkspaceDeps，其 permissions 属性为父会话的 PermissionManager。
+    """
+    parent_perms = getattr(parent, "permissions", None)
+    if parent_perms is None:
+        return
+    perms.solo_mode = parent_perms.solo_mode
+    perms.headless = parent_perms.headless
+    perms.mode = parent_perms.mode
+    perms.allow_rules = list(parent_perms.allow_rules)
+    perms.ask_rules = list(parent_perms.ask_rules)
+    perms.deny_rules = list(parent_perms.deny_rules)
+    perms._session_always = set(parent_perms._session_always)
+    perms._session_never = set(parent_perms._session_never)
+
+
 @dataclass
 class PermissionRule:
     action: str  # allow | ask | deny
