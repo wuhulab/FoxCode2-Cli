@@ -221,6 +221,15 @@ class UndoManager:
                             results.append(
                                 f"撤销重命名: {g_entry.file_path} -> {g_entry.old_content}"
                             )
+                        elif g_entry.operation == "copy":
+                            if g_path.exists():
+                                import shutil
+
+                                if g_path.is_dir():
+                                    shutil.rmtree(g_path)
+                                else:
+                                    g_path.unlink()
+                            results.append(f"撤销复制: {g_entry.file_path}")
                     except Exception as e:
                         self._history.append(g_entry)
                         results.append(f"撤销失败 ({g_entry.file_path}): {e}")
@@ -255,6 +264,15 @@ class UndoManager:
                     results.append(
                         f"撤销重命名: {entry.file_path} -> {entry.old_content}"
                     )
+                elif entry.operation == "copy":
+                    if full_path.exists():
+                        import shutil
+
+                        if full_path.is_dir():
+                            shutil.rmtree(full_path)
+                        else:
+                            full_path.unlink()
+                    results.append(f"撤销复制: {entry.file_path}")
             except Exception as e:
                 self._history.append(entry)
                 results.append(f"撤销失败 ({entry.file_path}): {e}")

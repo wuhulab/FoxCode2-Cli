@@ -27,10 +27,12 @@ def register(agent):
 
             if src.is_dir():
                 shutil.copytree(src, dst)
+                ctx.deps.undo_manager.record("copy", destination, old_content=source)
                 return f"已复制目录 {source} -> {destination}"
             else:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, dst)
+                ctx.deps.undo_manager.record("copy", destination, old_content=source)
                 return f"已复制文件 {source} -> {destination}"
         except Exception as e:
             return f"错误: 复制失败 - {e}"
