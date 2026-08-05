@@ -70,15 +70,19 @@ def load_mcp_toolsets(workspace_dir: Path, permissions) -> list[MCPToolset]:
             console.print(f"  [yellow]MCP 服务器 {name} 配置错误: {e}[/yellow]")
             continue
 
-        async def _process(ctx, call_tool, tool_name, args):
-            if permissions is not None:
-                target = (
-                    f"{tool_name} args={json.dumps(args, ensure_ascii=False)[:500]}"
-                )
-                err = permissions.check(f"mcp__{name}", (), {"command": target})
-                if err:
-                    raise ToolFailed(err)
-            return await call_tool(tool_name, args)
+        def _make_process(server_name):
+            async def _process(ctx, call_tool, tool_name, args):
+                if permissions is not None:
+                    target = (
+                        f"{tool_name} args={json.dumps(args, ensure_ascii=False)[:500]}"
+                    )
+                    err = permissions.check(f"mcp__{server_name}", (), {"command": target})
+                    if err:
+                        raise ToolFailed(err)
+                return await call_tool(tool_name, args)
+            return _process
+
+        _process = _make_process(name)
 
         try:
             if "command" in server:
