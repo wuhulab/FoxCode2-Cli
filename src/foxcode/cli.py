@@ -893,19 +893,19 @@ async def _run_headless(
     perms.headless = True
 
     skills_list, subagent_list = _agent_lists(skills_mgr, subagents_mgr)
-    agent = create_agent(
-        config,
-        mcp_toolsets=mcp_toolsets,
-        skills_list=skills_list,
-        subagent_list=subagent_list,
-    )
-
     proxy_mounts = _build_proxy_mounts(config)
 
     async with RetryClient(
         mounts=proxy_mounts or None,
         timeout=httpx.Timeout(config["request_timeout"]),
     ) as http_client:
+        agent = create_agent(
+            config,
+            http_client,
+            mcp_toolsets=mcp_toolsets,
+            skills_list=skills_list,
+            subagent_list=subagent_list,
+        )
         deps = WorkspaceDeps(
             workspace_dir=config["workspace_dir"].resolve(),
             http_client=http_client,
@@ -934,6 +934,7 @@ async def _run_headless(
                 console.print("[dim]  已自动禁用 MCP，继续运行...[/dim]", stderr=True)
                 agent = create_agent(
                     config,
+                    http_client,
                     mcp_toolsets=None,
                     skills_list=skills_list,
                     subagent_list=subagent_list,
