@@ -11,7 +11,7 @@ FORMATTERS = {
     ".ts": (["npx", "prettier", "--write"],),
     ".jsx": (["npx", "prettier", "--write"],),
     ".tsx": (["npx", "prettier", "--write"],),
-    ".json": (["npx", "prettier", "--write"], ["python", "-m", "json.tool"]),
+    ".json": (["npx", "prettier", "--write"],),
     ".md": (["npx", "prettier", "--write"],),
     ".yaml": (["npx", "prettier", "--write"],),
     ".yml": (["npx", "prettier", "--write"],),
