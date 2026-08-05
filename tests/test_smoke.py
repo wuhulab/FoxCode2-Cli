@@ -13,6 +13,7 @@ from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 
 from foxcode.agent import create_agent
+from foxcode.goal import GoalVerification, create_goal_verifier, verify_goal
 from foxcode.models import ActionPlan, ToolTracker, UndoManager, WorkspaceDeps
 from foxcode.permissions import PermissionManager
 from foxcode.skills import SkillsManager
@@ -308,6 +309,59 @@ def test_headless_cli_args():
     assert args.model == "gpt-4o"
 
 
+def test_goal_verifier_output_type():
+    from pydantic_ai.tools import ToolDefinition
+
+    from foxcode.subagents import _subagent_prepare
+
+    verifier = create_goal_verifier(dict(CONFIG), None)
+    assert verifier.output_type is GoalVerification
+
+    class FakeCtx:
+        deps = None
+
+    names = sorted(t for t in verifier._function_toolset.tools)
+    kept = {
+        t.name
+        for t in _subagent_prepare(FakeCtx(), [ToolDefinition(name=n) for n in names])
+    }
+    assert "read_file" in kept
+    assert "run_shell" not in kept, "验收 AI 不应暴露写/执行工具"
+
+
+@pytest.mark.asyncio
+async def test_goal_verifier_runs():
+    """验收 AI 用 TestModel 运行，应返回结构化 GoalVerification。"""
+    import tempfile
+
+    from pydantic_ai import Agent
+    from pydantic_ai.capabilities import PrepareTools
+    from pydantic_ai.models.test import TestModel
+
+    from foxcode.goal import VERIFIER_SYSTEM_PROMPT
+    from foxcode.subagents import _subagent_prepare
+
+    verifier = Agent(
+        TestModel(call_tools="all", model_name="gpt-4o-mini"),
+        deps_type=WorkspaceDeps,
+        output_type=GoalVerification,
+        system_prompt=VERIFIER_SYSTEM_PROMPT,
+        capabilities=[PrepareTools(_subagent_prepare)],
+    )
+
+    with tempfile.TemporaryDirectory() as td:
+        deps = _make_deps(Path(td))
+        verif = await verify_goal(
+            deps,
+            goal="创建 hello.py",
+            work_summary="主 AI 已创建 hello.py",
+            verifier_agent=verifier,
+        )
+        assert isinstance(verif, GoalVerification)
+        assert hasattr(verif, "completed")
+        assert hasattr(verif, "reason")
+
+
 if __name__ == "__main__":
     import json
 
@@ -332,4 +386,6 @@ if __name__ == "__main__":
     print("  ok - test_agent_tool_schema_and_validator")
     test_plan_mode_prepare_hides_write_tools()
     print("  ok - test_plan_mode_prepare_hides_write_tools")
+    asyncio.run(test_goal_verifier_runs())
+    print("  ok - test_goal_verifier_runs")
     print("ALL TESTS PASSED")

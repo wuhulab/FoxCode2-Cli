@@ -20,6 +20,7 @@ foxcode/
 ├── builtin_skills/     # 内置 Skills（随包分发）
 │   └── novel-control-station/   # 中文长篇小说创作控制中枢
 ├── subagents.py        # 子代理管理：隔离上下文的只读探索
+├── goal.py             # Goal 模式：独立上下文验收 AI，确认目标完成
 ├── mcp_manager.py      # MCP 服务器加载与权限门控
 ├── tools/              # AI 可用工具集
 └── vscode-extension/   # VS Code 插件（一键右侧启动 foxcode）
@@ -130,6 +131,7 @@ def register(agent):
 - [x] 项目健康检查（project_health）
 - [x] LSP 集成（基于 jedi） - 跳转定义、查找引用、类型信息
 - [x] IDE 插件（VSCode）
+- [x] Goal 模式（/goal）- AI 完成后由独立上下文验收 AI 确认目标，未完成则继续直到达成
 
 ├── vscode-extension/   # VS Code 插件
 │   ├── package.json

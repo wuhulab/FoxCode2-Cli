@@ -46,6 +46,7 @@ class FoxCodeCompleter(Completer):
 
     COMMANDS = [
         ("/help", "显示帮助"),
+        ("/goal ", "设定目标并自动验收循环"),
         ("/plan", "切换计划模式"),
         ("/solo", "切换无人值守模式"),
         ("/permissions", "查看权限设置"),
@@ -227,6 +228,7 @@ def print_welcome():
     title = Panel.fit(
         "[bold cyan]FoxCode Cli[/bold cyan] v0.5.0\n"
         "[yellow]/help[/yellow] 查看命令  "
+        "[yellow]/goal[/yellow] 目标验收  "
         "[yellow]/plan[/yellow] 计划模式  "
         "[yellow]/solo[/yellow] 无人值守  "
         "[yellow]/permissions[/yellow] 权限设置  "
@@ -250,6 +252,9 @@ def print_help():
     table.add_column("命令", style="yellow")
     table.add_column("说明", style="white")
     table.add_row("/help", "显示此帮助")
+    table.add_row(
+        "/goal <目标>", "设定目标，AI 完成后自动验收，未完成则继续直到确认达成"
+    )
     table.add_row("/plan", "切换计划模式（只读探索，先出方案）")
     table.add_row("/solo", "切换无人值守模式（自动放行，只拦截高危命令）")
     table.add_row("/permissions", "查看当前权限模式与规则")
@@ -753,6 +758,107 @@ async def _run_status_loop(
     return all_messages, plan
 
 
+async def _run_goal_loop(
+    agent,
+    goal: str,
+    all_messages: list,
+    deps: WorkspaceDeps,
+    config: dict,
+    max_iterations: int = 8,
+):
+    """Goal 模式：执行目标 → 独立验收 AI 确认 → 未完成则继续，直到确认为止。
+
+    每轮先用主 AI 处理目标（可访问完整上下文与全部工具），完成后启动一个
+    独立上下文、只读的验收 AI（ai-a）核对工作区真实状态。若验收不通过，
+    把验收反馈作为后续指令交给主 AI 继续工作，循环直到验收通过或达到上限。
+    """
+    from .goal import create_goal_verifier, verify_goal
+
+    verifier = create_goal_verifier(config, deps.http_client)
+
+    for iteration in range(1, max_iterations + 1):
+        console.print()
+        console.print(
+            Panel(
+                Markdown(f"## 目标执行 第 {iteration} 轮\n\n{goal}"),
+                title="[bold cyan]/goal[/bold cyan]",
+                border_style="cyan",
+            )
+        )
+
+        deps.tool_tracker.reset()
+        work_prompt = f"请完成以下目标：\n\n{goal}"
+        all_messages, plan = await _run_status_loop(
+            agent, work_prompt, all_messages, deps, config
+        )
+
+        console.print(
+            f"  [bold cyan]工具调用: {deps.tool_tracker.summary_str()}[/bold cyan]"
+        )
+        print_action_plan(plan)
+
+        console.print()
+        console.print("[yellow]正在启动独立上下文验收 AI 核验目标完成情况...[/yellow]")
+        work_summary = f"目标: {goal}\n\n主 AI 说明: {plan.explanation}\n" + (
+            f"修改的文件: {', '.join(plan.files_modified)}\n"
+            if plan.files_modified
+            else ""
+        )
+        try:
+            verification = await verify_goal(deps, goal, work_summary, verifier)
+        except Exception as e:
+            console.print(f"[red]验收失败: {e}[/red]")
+            console.print("[yellow]请人工确认目标是否完成。[/yellow]")
+            return all_messages
+
+        if verification.completed:
+            console.print(
+                Panel(
+                    Markdown(
+                        f"## 目标已确认完成 ✓\n\n**验收结论**: {verification.reason}"
+                    ),
+                    title="[bold green]验收通过[/bold green]",
+                    border_style="green",
+                )
+            )
+            return all_messages
+
+        console.print(
+            Panel(
+                Markdown(
+                    f"## 目标尚未完成\n\n**验收结论**: {verification.reason}\n\n"
+                    "**未达标事项**:\n"
+                    + "\n".join(f"- {g}" for g in verification.gaps)
+                    or "*（验收 AI 未给出具体缺口）*"
+                ),
+                title="[bold yellow]验收未通过，继续工作[/bold yellow]",
+                border_style="yellow",
+            )
+        )
+
+        gaps_text = "\n".join(f"- {g}" for g in verification.gaps)
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        all_messages.append(
+            ModelRequest(
+                parts=[
+                    UserPromptPart(
+                        content=(
+                            "独立验收 AI 判定上述目标尚未完成。请根据以下验收反馈继续工作，"
+                            "直到目标真正达成：\n\n"
+                            f"验收结论: {verification.reason}\n"
+                            f"未达标事项:\n{gaps_text}"
+                        )
+                    )
+                ]
+            )
+        )
+
+    console.print(f"[red]达到最大迭代次数 ({max_iterations})，目标仍未确认完成。[/red]")
+    console.print("[yellow]请人工介入确认，或再次执行 /goal 继续。[/yellow]")
+    return all_messages
+
+
 def _save_session(session_manager: SessionManager, all_messages: list):
     if all_messages:
         name = session_manager.get_auto_save_name()
@@ -1020,6 +1126,23 @@ async def _run_interactive(config: dict, args):
                         return
                     elif cmd == "/help":
                         print_help()
+                        continue
+                    elif cmd.startswith("/goal"):
+                        goal_text = (
+                            prompt.split(maxsplit=1)[1]
+                            if len(prompt.split(maxsplit=1)) > 1
+                            else ""
+                        )
+                        if not goal_text:
+                            goal_text = console.input(
+                                "[bold cyan]请输入目标: [/bold cyan]"
+                            ).strip()
+                        if not goal_text:
+                            console.print("[yellow]已取消（目标为空）[/yellow]")
+                            continue
+                        all_messages = await _run_goal_loop(
+                            agent, goal_text, all_messages, deps, config
+                        )
                         continue
                     elif cmd == "/plan":
                         deps.plan_mode = not deps.plan_mode

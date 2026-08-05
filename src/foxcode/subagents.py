@@ -96,8 +96,12 @@ def create_subagent_agent(
     system_prompt: str,
     model_name: str | None = None,
     tools: list[str] | None = None,
+    output_type: type = str,
 ) -> Agent[WorkspaceDeps, str]:
-    """创建只读子代理 Agent。"""
+    """创建只读子代理 Agent。
+
+    output_type 可指定结构化输出模型（如 GoalVerification），默认返回 str。
+    """
     model = OpenAIChatModel(
         model_name or config["model"],
         provider=OpenAIProvider(
@@ -121,7 +125,7 @@ def create_subagent_agent(
     child: Agent[WorkspaceDeps, str] = Agent(
         model,
         deps_type=WorkspaceDeps,
-        output_type=str,
+        output_type=output_type,
         system_prompt=system_prompt,
         model_settings=model_settings,
         capabilities=capabilities,
