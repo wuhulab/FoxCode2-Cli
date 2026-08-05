@@ -51,7 +51,7 @@ def _run_command(cwd: Path, cmd: list[str], timeout: int = 120) -> tuple[str, in
         return output, result.returncode
     except subprocess.TimeoutExpired:
         return f"错误: 测试执行超时 ({timeout}秒)", -1
-    except FileNotFoundError as e:
+    except FileNotFoundError:
         return f"错误: 找不到命令 {cmd[0]}，请确保已安装", -1
     except Exception as e:
         return f"错误: 测试执行失败 - {e}", -1
