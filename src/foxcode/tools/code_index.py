@@ -169,7 +169,7 @@ class CodeIndex:
                 self._file_mtime[str(f)] = f.stat().st_mtime
 
             return f"代码库索引完成 (ctags): 共 {count} 个符号"
-        except Exception as e:
+        except Exception:
             return None
 
     def _build_ast_index(self) -> str:
