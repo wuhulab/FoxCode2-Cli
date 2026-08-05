@@ -32,18 +32,15 @@ def _resolve_filepath(workspace_dir: Path, filename: str) -> Path | None:
 def _rowcol_to_pos(source: str, row: int, col: int) -> int:
     """将行号/列号转换为源码中的字符位置（0-index）。"""
     lines = source.splitlines()
-    pos = sum(len(l) + 1 for l in lines[: row - 1])  # +1 for newline
+    pos = sum(len(line) + 1 for line in lines[: row - 1])  # +1 for newline
     pos += max(0, col - 1)
     return min(pos, len(source))
 
 
 def _jedi_available() -> bool:
-    try:
-        import jedi
+    import importlib.util
 
-        return True
-    except ImportError:
-        return False
+    return importlib.util.find_spec("jedi") is not None
 
 
 def _format_definition(defs: list) -> str:
