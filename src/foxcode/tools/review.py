@@ -146,7 +146,7 @@ def register(agent):
             [
                 "",
                 "---",
-                f"审查完成。如需更详细的分析，可使用 run_shell 运行代码检查工具（如 pylint, eslint, mypy 等）。",
+                "审查完成。如需更详细的分析，可使用 run_shell 运行代码检查工具（如 pylint, eslint, mypy 等）。",
             ]
         )
 
