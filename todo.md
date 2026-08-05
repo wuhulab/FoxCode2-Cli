@@ -1,3 +1,16 @@
-- [ ] 运行测试并分析 bug
-- [ ] 修复 bug 并提交（逐个进行）
-- [ ] 验证所有测试通过
+- [x] 运行测试并分析 bug（23 个冒烟测试全部通过）
+- [x] 修复 agent.py 未使用导入
+- [x] 修复 skills.py 变量名不规范
+- [x] 修复 tools/code_index.py 未使用变量
+- [x] 修复 tools/copy_file.py 未使用导入
+- [x] 修复 tools/format.py 未使用导入
+- [x] 修复 tools/health.py 未使用导入和无意义 f-string
+- [x] 修复 tools/lsp_bridge.py 变量名不规范和未使用导入
+- [x] 修复 tools/multi_edit.py 未使用导入
+- [x] 修复 tools/preview.py 未使用导入
+- [x] 修复 tools/review.py 无意义 f-string
+- [x] 修复 tools/tests.py 未使用变量
+- [x] 修复 tools/tree.py 未使用变量
+- [x] 修复 cli.py 多项问题（未使用导入、变量、变量名、f-string、E402）
+- [x] 修复多处 E203 切片空格问题
+- [x] 验证所有测试通过
