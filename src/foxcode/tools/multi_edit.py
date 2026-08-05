@@ -142,13 +142,10 @@ def register(agent):
                 if fuzzy:
                     new_content, ok, msg = _apply_fuzzy_replace(content, old_string, new_string)
                 else:
-                    new_content, ok, msg = _apply_fuzzy_replace(content, old_string, new_string)
-                    # 非 fuzzy 模式下，如果精确匹配成功就继续，否则失败
-                    # 但 _apply_fuzzy_replace 内部已经处理了精确匹配
-                    if content.count(old_string) == 1:
-                        new_content = content.replace(old_string, new_string, 1)
-                        ok = True
-                        msg = "精确匹配替换成功"
+                    # 预验证阶段已保证非 fuzzy 模式下精确匹配唯一
+                    new_content = content.replace(old_string, new_string, 1)
+                    ok = True
+                    msg = "精确匹配替换成功"
 
                 if not ok:
                     # 回滚已应用的
