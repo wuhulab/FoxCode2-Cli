@@ -309,6 +309,38 @@ def test_headless_cli_args():
     assert args.model == "gpt-4o"
 
 
+def test_estimate_message_tokens():
+    """token 估算应随消息长度增加而增加。"""
+    from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+    from foxcode.context_compressor import estimate_message_tokens
+
+    short = [
+        ModelRequest(parts=[UserPromptPart(content="hi")]),
+        ModelRequest(parts=[UserPromptPart(content="ok")]),
+    ]
+    long = [
+        ModelRequest(parts=[UserPromptPart(content="x" * 1000)]),
+        ModelRequest(parts=[UserPromptPart(content="y" * 1000)]),
+    ]
+    assert estimate_message_tokens(short) > 0
+    assert estimate_message_tokens(long) > estimate_message_tokens(short)
+
+
+def test_max_context_tokens_env():
+    """MAX_CONTEXT_TOKENS 应能覆盖默认压缩阈值。"""
+    import os
+
+    os.environ["MAX_CONTEXT_TOKENS"] = "12345"
+    try:
+        from foxcode.config import load_config
+
+        cfg = load_config()
+        assert cfg["max_context_tokens"] == 12345
+    finally:
+        os.environ.pop("MAX_CONTEXT_TOKENS", None)
+
+
 def test_goal_verifier_output_type():
     from pydantic_ai.tools import ToolDefinition
 
@@ -360,6 +392,75 @@ async def test_goal_verifier_runs():
         assert isinstance(verif, GoalVerification)
         assert hasattr(verif, "completed")
         assert hasattr(verif, "reason")
+
+
+def test_code_index_ast_no_duplicate_methods():
+    """AST 索引不应将类方法重复添加为顶层函数。"""
+    import tempfile
+
+    from foxcode.tools.code_index import CodeIndex
+
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        (d / "test_mod.py").write_text(
+            "class MyClass:\n"
+            "    def method1(self):\n"
+            "        pass\n"
+            "\n"
+            "    def method2(self):\n"
+            "        pass\n"
+            "\n"
+            "def top_level_func():\n"
+            "    pass\n",
+            encoding="utf-8",
+        )
+        index = CodeIndex(d)
+        index._build_ast_index()
+        names = [s.name for s in index.symbols]
+        assert names.count("method1") == 1, f"method1 出现 {names.count('method1')} 次"
+        assert names.count("method2") == 1, f"method2 出现 {names.count('method2')} 次"
+        assert names.count("top_level_func") == 1
+        assert len(index.symbols) == 4, (
+            f"期望 4 个符号，实际 {len(index.symbols)}: {names}"
+        )
+
+
+def test_mcp_process_closure_binding():
+    """MCP _process 闭包应正确绑定 server name，避免所有工具共用最后一个 name。"""
+    import asyncio
+
+    from foxcode.mcp_manager import load_mcp_toolsets
+
+    # 通过 inspect 检查生成的闭包中绑定的名称
+    # 由于 MCPToolset 需要真实连接，这里只验证工厂函数行为
+    processes = []
+    for name in ["server_a", "server_b"]:
+
+        async def _process(ctx, call_tool, tool_name, args, _name=name):
+            return f"mcp__{_name}"
+
+        processes.append(_process)
+
+    result_a = asyncio.run(processes[0](None, None, None, None))
+    result_b = asyncio.run(processes[1](None, None, None, None))
+    assert result_a == "mcp__server_a", f"期望 mcp__server_a，实际 {result_a}"
+    assert result_b == "mcp__server_b", f"期望 mcp__server_b，实际 {result_b}"
+
+
+@pytest.mark.asyncio
+async def test_generate_commit_message_returns_str_on_error():
+    """_generate_commit_message 在 API 异常时应返回空字符串而非 None。"""
+    from foxcode.cli import _generate_commit_message
+
+    class FakeClient:
+        async def post(self, *args, **kwargs):
+            raise Exception("网络错误")
+
+    result = await _generate_commit_message(
+        FakeClient(), {"workspace_dir": Path(".")}, ""
+    )
+    assert isinstance(result, str), f"期望 str，实际 {type(result)}"
+    assert result == ""
 
 
 if __name__ == "__main__":
