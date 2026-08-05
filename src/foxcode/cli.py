@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 import httpx
-from httpx import AsyncHTTPTransport
 from pydantic_ai.exceptions import (
     UnexpectedModelBehavior,
     ModelHTTPError,
@@ -29,8 +28,6 @@ try:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.completion import Completer, Completion
     from prompt_toolkit.history import FileHistory
-    from prompt_toolkit.key_binding import KeyBindings
-    from prompt_toolkit.formatted_text import HTML
 
     _PROMPT_TOOLKIT_AVAILABLE = True
 except ImportError:
@@ -326,7 +323,6 @@ def _parse_image_refs(prompt: str, workspace_dir: Path) -> str | list:
     parts: list = []
     last_end = 0
     for m in matches:
-        alt = m.group(1)
         img_path = m.group(2).strip()
         # 只处理已知图片扩展名
         if not img_path.lower().endswith(IMAGE_EXTS):
@@ -383,7 +379,7 @@ def _show_git_status_hint(workspace_dir: Path):
             return
         # 第一行是分支信息
         branch_line = lines[0] if lines else ""
-        changes = [l for l in lines[1:] if l.strip()]
+        changes = [line for line in lines[1:] if line.strip()]
         if not changes:
             return
         console.print(f"[yellow]检测到未提交变更 ({len(changes)} 个文件):[/yellow]")
@@ -453,8 +449,6 @@ def print_action_plan(plan: ActionPlan, skip_explanation: bool = False):
 
 def _show_colored_diff(workspace_dir: Path, files: list[str]):
     """展示有修改的文件的彩色 diff 预览。"""
-    import difflib
-
     if not files:
         return
     for filename in files:
@@ -1609,7 +1603,7 @@ async def _run_interactive(config: dict, args):
                                 all_messages, http_client, config
                             )
                         if summary_text:
-                            console.print(f"  [dim]上下文已压缩，保留关键信息[/dim]")
+                            console.print("  [dim]上下文已压缩，保留关键信息[/dim]")
 
                     summary = deps.tool_tracker.summary_str()
                     if summary:
