@@ -1,6 +1,5 @@
 """项目健康检查工具：检查项目依赖、测试、配置等是否完整。"""
 
-import json
 import subprocess
 from pathlib import Path
 
@@ -109,7 +108,7 @@ def _check_tests(workspace_dir: Path, langs: list[str]) -> str:
                 has_test_files = True
                 break
             # 手动查找测试文件
-            for f in workspace_dir.rglob(f"*test*"):
+            for f in workspace_dir.rglob("*test*"):
                 if f.is_file():
                     has_test_files = True
                     break
