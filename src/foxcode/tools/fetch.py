@@ -83,7 +83,7 @@ def _validate_fetch_url(url: str) -> str | None:
         if _ip_is_private(ip):
             return f"错误: 目标地址 {host} 属于内网/保留地址，已阻止 SSRF 请求"
     else:
-        if host.endswith(_INTERNAL_HOSTNAME_SUFFIXES):
+        if host == "localhost" or host.endswith(_INTERNAL_HOSTNAME_SUFFIXES):
             return f"错误: 目标主机 {host} 属于内部主机名，已阻止 SSRF 请求"
         # 解析 DNS 并检查所有解析结果（尽力而为，注意 DNS rebinding 边界）
         try:
