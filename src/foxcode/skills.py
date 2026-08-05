@@ -59,7 +59,7 @@ class SkillsManager:
             name = str(meta.get("name") or name).strip().lower()
             desc = str(meta.get("description") or "").strip()
             if not desc:
-                first_lines = [l for l in body.strip().splitlines() if l.strip()]
+                first_lines = [line for line in body.strip().splitlines() if line.strip()]
                 desc = first_lines[0][:120] if first_lines else name
             self.skills[name] = Skill(
                 name=name,
