@@ -51,7 +51,6 @@ def _build_tree(
         connector = "└── " if is_last else "├── "
         child_prefix = "    " if is_last else "│   "
 
-        rel = entry.relative_to(workspace_dir)
         if entry.is_dir():
             lines.append(f"{prefix}{connector}{entry.name}/")
             lines.extend(
