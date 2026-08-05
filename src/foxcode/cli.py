@@ -761,6 +761,20 @@ async def _run_status_loop(
     return all_messages, plan
 
 
+GOAL_PERSIST_INSTRUCTION = """你正处于 /goal 目标模式。上下文可能被自动压缩，为确保持续工作不丢失进度，请严格遵循以下文件持久化规范：
+
+1. 在本工作区根目录维护三个持久化文件（若不存在则创建，已存在则先读取再更新）：
+   - goal.md  记录：目标定义、验收标准、当前完成状态、已完成/未完成的事项
+   - plan.md  记录：整体实施计划、当前阶段方案、关键决策与理由
+   - todo.md  记录：任务清单，未完成项用 `- [ ]` 标记，已完成项用 `- [x]` 标记，并附简短说明
+
+2. 每轮工作开始时，先读取这三个文件，基于其内容继续推进（尤其当对话历史被压缩后，这三个文件是你的唯一可靠记忆）。
+
+3. 每完成一个重要步骤，立即同步更新对应文件，确保文件永远反映最新进度，文字简洁但信息完整。
+
+4. 在最终回复的 ActionPlan 中，说明你更新了哪些持久化文件、当前处于什么阶段。"""
+
+
 async def _run_goal_loop(
     agent,
     goal: str,
@@ -778,6 +792,7 @@ async def _run_goal_loop(
     from .goal import create_goal_verifier, verify_goal
 
     verifier = create_goal_verifier(config, deps.http_client)
+    max_context_tokens = config.get("max_context_tokens", 100000)
 
     for iteration in range(1, max_iterations + 1):
         console.print()
@@ -790,10 +805,25 @@ async def _run_goal_loop(
         )
 
         deps.tool_tracker.reset()
-        work_prompt = f"请完成以下目标：\n\n{goal}"
+        work_prompt = f"请完成以下目标：\n\n{goal}\n\n{GOAL_PERSIST_INSTRUCTION}"
         all_messages, plan = await _run_status_loop(
             agent, work_prompt, all_messages, deps, config
         )
+
+        from .context_compressor import compress_messages, estimate_message_tokens
+
+        if (
+            len(all_messages) > 50
+            or estimate_message_tokens(all_messages) > max_context_tokens
+        ):
+            with console.status("[dim]智能压缩上下文中...[/dim]", spinner="fox"):
+                all_messages, summary_text = await compress_messages(
+                    all_messages, deps.http_client, config
+                )
+            if summary_text:
+                console.print(
+                    "  [dim]上下文已压缩，持久化文件 (goal.md/plan.md/todo.md) 将用于恢复进度[/dim]"
+                )
 
         console.print(
             f"  [bold cyan]工具调用: {deps.tool_tracker.summary_str()}[/bold cyan]"
