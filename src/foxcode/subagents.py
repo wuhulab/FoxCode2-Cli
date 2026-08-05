@@ -10,6 +10,7 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.tools import ToolDefinition
+from pydantic_ai.usage import UsageLimits
 
 from .models import ToolTracker, WorkspaceDeps
 from .permissions import PermissionManager, is_write_tool
@@ -79,7 +80,7 @@ def _split_frontmatter(text: str) -> tuple[str | None, str]:
 
     m = re.match(r"^---\s*\n(.*?)\n---\s*\n", text, re.DOTALL)
     if m:
-        return m.group(1), text[m.end():]
+        return m.group(1), text[m.end() :]
     return None, text
 
 
@@ -242,7 +243,12 @@ async def run_subagent(
         f"  [dim]子代理 {definition.name if definition else 'general'} 启动...[/dim]"
     )
     try:
-        result = await agent.run(prompt, deps=_child_deps(ctx))
+        # 子代理可能需要大量只读调查，使用与主 agent 相同的无限请求限制
+        result = await agent.run(
+            prompt,
+            deps=_child_deps(ctx),
+            usage_limits=UsageLimits(request_limit=None),
+        )
         output = result.output or ""
     except Exception as e:
         return f"错误: 子代理运行失败 - {e}"

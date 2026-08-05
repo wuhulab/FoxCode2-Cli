@@ -4,6 +4,7 @@
 """
 
 from pydantic import BaseModel, Field
+from pydantic_ai.usage import UsageLimits
 
 from .models import ToolTracker, WorkspaceDeps
 from .permissions import PermissionManager, inherit_permissions
@@ -82,5 +83,10 @@ async def verify_goal(
         f"主 AI 声称已完成的工作：\n{work_summary}\n\n"
         f"请使用只读工具亲自检查工作区，严格核验目标是否真正完成，并输出结构化结论。"
     )
-    result = await verifier_agent.run(prompt, deps=_verifier_deps(deps))
+    # 验收 AI 可能需要大量只读检查（文件/搜索/历史），使用与主 agent 相同的无限请求限制
+    result = await verifier_agent.run(
+        prompt,
+        deps=_verifier_deps(deps),
+        usage_limits=UsageLimits(request_limit=None),
+    )
     return result.output
