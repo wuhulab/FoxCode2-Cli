@@ -1,28 +1,16 @@
 # 整体实施计划
 
 ## 当前阶段
-已完成：所有测试通过，所有 lint 检查通过（ruff + flake8 均为 0 错误）。
+已完成：自动加载 `.foxcode/foxcode.md` 功能已实现并通过测试。
 
 ## 关键决策
-- 每修复一个文件的 bug 集合，立即提交一次 git，保持提交粒度清晰
-- 优先修复 F841（未使用变量）、F541（无意义 f-string）、E741（易混淆变量名）
-- 同时清理 F401（未使用导入）降低导入开销
-- 修复 E402（cli.py 模块级导入位置）以避免条件导入后的相对导入问题
-- 修复 E203（切片表达式冒号前空格）以统一代码风格
+- 在 `_run_interactive` 函数中，构建完 agent 后、进入 `_run_loop` 前，检测 `.foxcode/foxcode.md`
+- 使用 `default_prompt` 变量在 `_run_loop` 的第一次迭代中自动注入，避免大幅重构循环逻辑
+- 保持与现有 prompt 处理流程完全一致（文件引用展开、skill 注入、图片解析、plan_mode 等）
+- 仅影响交互模式，headless 模式保持原样
 
-## 提交记录
-1. 修复 agent.py 未使用的 typing.Any 导入
-2. 修复 skills.py 易混淆变量名 l 改为 line
-3. 修复 code_index.py 未使用的异常变量 e
-4. 修复 copy_file.py 未使用的 Path 导入
-5. 修复 format.py 未使用的 Path 导入
-6. 修复 health.py 未使用的 json 导入和无意义 f-string
-7. 修复 lsp_bridge.py 易混淆变量名和未使用 jedi 导入方式
-8. 修复 multi_edit.py 未使用的 re 导入
-9. 修复 preview.py 未使用的 Path 导入
-10. 修复 review.py 无意义 f-string
-11. 修复 tests.py 未使用的 FileNotFoundError 变量 e
-12. 修复 tree.py 未使用的 rel 变量
-13. 修复 cli.py 多项代码质量问题（未使用导入、变量、变量名、f-string）
-14. 修复 cli.py E402 模块级导入位置问题
-15. 修复多处 E203 切片表达式中冒号前多余空格
+## 实施步骤
+1. [x] 在 `cli.py` 的 `_run_interactive` 中，于 `_run_loop` 定义前读取 `.foxcode/foxcode.md`
+2. [x] 修改 `_run_loop`，在 while True 开始时优先使用 `default_prompt`，用完后置空
+3. [x] 添加加载成功提示信息
+4. [x] 运行测试验证（23 passed，ruff + flake8 通过）
