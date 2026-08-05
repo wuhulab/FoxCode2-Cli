@@ -187,6 +187,9 @@ class CodeIndex:
             rel = str(f.relative_to(self.workspace_dir))
             self._file_mtime[str(f)] = f.stat().st_mtime
 
+            # 先收集类方法节点 id，避免后续重复添加为顶层函数
+            class_method_ids: set[int] = set()
+
             for node in ast.walk(tree):
                 if isinstance(node, ast.ClassDef):
                     doc = ast.get_docstring(node) or ""
@@ -220,28 +223,27 @@ class CodeIndex:
                                 )
                             )
                             count += 1
+                            class_method_ids.add(id(item))
 
-                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    # 顶层函数（排除类内部的方法，因为已经在上面的循环中处理）
-                    if not any(
-                        isinstance(parent, ast.ClassDef)
-                        for parent in ast.walk(tree)
-                        if hasattr(node, "parent")
-                    ):
-                        doc = ast.get_docstring(node) or ""
-                        self.symbols.append(
-                            Symbol(
-                                name=node.name,
-                                kind="function",
-                                file=rel,
-                                line=node.lineno,
-                                end_line=getattr(node, "end_lineno", node.lineno),
-                                signature=self._func_signature(node),
-                                parent="",
-                                docstring=doc,
-                            )
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    # 跳过已在类中处理的方法
+                    if id(node) in class_method_ids:
+                        continue
+                    doc = ast.get_docstring(node) or ""
+                    self.symbols.append(
+                        Symbol(
+                            name=node.name,
+                            kind="function",
+                            file=rel,
+                            line=node.lineno,
+                            end_line=getattr(node, "end_lineno", node.lineno),
+                            signature=self._func_signature(node),
+                            parent="",
+                            docstring=doc,
                         )
-                        count += 1
+                    )
+                    count += 1
 
         return f"代码库索引完成 (AST): 共 {count} 个符号"
 
