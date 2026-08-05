@@ -577,8 +577,8 @@ async def _generate_commit_message(
         data = response.json()
         msg = data["choices"][0]["message"]["content"].strip().strip("\"'")
         return msg
-    except Exception as e:
-        return None
+    except Exception:
+        return ""
 
 
 def _build_proxy_mounts(config: dict) -> dict:
