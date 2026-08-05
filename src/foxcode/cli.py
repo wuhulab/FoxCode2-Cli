@@ -465,13 +465,16 @@ def _show_colored_diff(workspace_dir: Path, files: list[str]):
         # 用 git diff 更通用
     # 统一用 git diff -- 展示所有变更
     result = _exec_shell("git diff --no-color", workspace_dir, timeout=15)
-    if not result or "退出码" in result and "没有" in result:
-        return
-    if "exit code" in result.lower() and "no changes" in result.lower():
+    if not result or "退出码" in result:
         return
     # 简化为只显示修改摘要
     stat = _exec_shell("git diff --stat", workspace_dir, timeout=10)
-    if stat and "退出码" not in stat and stat.strip():
+    if (
+        stat
+        and "退出码" not in stat
+        and stat.strip()
+        and stat.strip() != "(命令执行成功，无输出)"
+    ):
         console.print(f"  [dim]变更摘要:\n{stat}[/dim]")
 
 
