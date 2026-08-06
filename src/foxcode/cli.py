@@ -1,18 +1,13 @@
+from __future__ import annotations
+
 import argparse
 import asyncio
 import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Sequence
+from typing import TYPE_CHECKING, Any, Sequence
 import httpx
-from pydantic_ai.exceptions import (
-    UnexpectedModelBehavior,
-    ModelHTTPError,
-    ModelAPIError,
-)
-from pydantic_ai.usage import UsageLimits
-from pydantic_ai.messages import ImageUrl
 from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
@@ -28,68 +23,67 @@ from .config import (
     BUILTIN_FREE_BASE_URL,
     BUILTIN_FREE_API_KEY,
 )
-from .models import ActionPlan, WorkspaceDeps, UndoManager
-from .agent import create_agent
-from .session import SessionManager
 from .permissions import PermissionManager
-from .skills import SkillsManager
-from .subagents import SubAgentManager
-from .mcp_manager import load_mcp_toolsets
+from .tools import run_subprocess
+
+if TYPE_CHECKING:
+    from .models import ActionPlan, WorkspaceDeps
 
 SPINNERS["fox"] = {"interval": 100, "frames": ["-", "/", "\\", "-"]}
 
-# prompt_toolkit 用于增强输入体验
-try:
-    from prompt_toolkit import PromptSession
-    from prompt_toolkit.completion import Completer, Completion
-    from prompt_toolkit.history import FileHistory
 
-    _PROMPT_TOOLKIT_AVAILABLE = True
-except ImportError:
-    _PROMPT_TOOLKIT_AVAILABLE = False
-    PromptSession = None
-    Completer = None
-    Completion = None
-    FileHistory = None
+def _make_prompt_session(history_file: Path):
+    """延迟导入 prompt_toolkit 构建增强输入会话，失败时回退到 input()。"""
+    try:
+        from prompt_toolkit import PromptSession
+        from prompt_toolkit.completion import Completer, Completion
+        from prompt_toolkit.history import FileHistory
+    except ImportError:
+        return DummyPromptSession()
 
+    class FoxCodeCompleter(Completer):
+        """命令自动补全器。"""
 
-class FoxCodeCompleter(Completer):
-    """命令自动补全器。"""
+        COMMANDS = [
+            ("/help", "显示帮助"),
+            ("/goal ", "设定目标并自动验收循环"),
+            ("/plan", "切换计划模式"),
+            ("/solo", "切换无人值守模式"),
+            ("/permissions", "查看权限设置"),
+            ("/free", "切换到内置免费 API 并选择模型"),
+            ("/model", "配置模型参数"),
+            ("/mcp", "列出 MCP 服务器"),
+            ("/skills", "列出可用 Skills"),
+            ("/skill ", "加载指定 Skill"),
+            ("/agents", "列出可用子代理"),
+            ("/term", "切换终端模式"),
+            ("/clear", "清屏"),
+            ("/history", "显示操作历史"),
+            ("/usage", "显示用量统计"),
+            ("/session list", "列出已保存会话"),
+            ("/session save ", "保存当前会话"),
+            ("/session load ", "加载指定会话"),
+            ("/session del ", "删除指定会话"),
+            ("/export ", "导出会话为 Markdown"),
+            ("/undo", "撤销最近操作"),
+            ("/commit", "智能提交 Git 变更"),
+            ("/exit", "退出程序"),
+            ("/quit", "退出程序"),
+        ]
 
-    COMMANDS = [
-        ("/help", "显示帮助"),
-        ("/goal ", "设定目标并自动验收循环"),
-        ("/plan", "切换计划模式"),
-        ("/solo", "切换无人值守模式"),
-        ("/permissions", "查看权限设置"),
-        ("/free", "切换到内置免费 API 并选择模型"),
-        ("/model", "配置模型参数"),
-        ("/mcp", "列出 MCP 服务器"),
-        ("/skills", "列出可用 Skills"),
-        ("/skill ", "加载指定 Skill"),
-        ("/agents", "列出可用子代理"),
-        ("/term", "切换终端模式"),
-        ("/clear", "清屏"),
-        ("/history", "显示操作历史"),
-        ("/usage", "显示用量统计"),
-        ("/session list", "列出已保存会话"),
-        ("/session save ", "保存当前会话"),
-        ("/session load ", "加载指定会话"),
-        ("/session del ", "删除指定会话"),
-        ("/export ", "导出会话为 Markdown"),
-        ("/undo", "撤销最近操作"),
-        ("/commit", "智能提交 Git 变更"),
-        ("/exit", "退出程序"),
-        ("/quit", "退出程序"),
-    ]
+        def get_completions(self, document, complete_event):
+            text = document.text
+            if not text.startswith("/"):
+                return
+            for cmd, desc in self.COMMANDS:
+                if cmd.startswith(text):
+                    yield Completion(cmd, start_position=-len(text), display_meta=desc)
 
-    def get_completions(self, document, complete_event):
-        text = document.text
-        if not text.startswith("/"):
-            return
-        for cmd, desc in self.COMMANDS:
-            if cmd.startswith(text):
-                yield Completion(cmd, start_position=-len(text), display_meta=desc)
+    return PromptSession(
+        completer=FoxCodeCompleter(),
+        history=FileHistory(str(history_file)),
+        multiline=False,
+    )
 
 
 class DummyPromptSession:
@@ -325,6 +319,7 @@ def _parse_image_refs(prompt: str, workspace_dir: Path) -> str | list:
     """
     import base64
     import re
+    from pydantic_ai.messages import ImageUrl
 
     IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
 
@@ -460,22 +455,21 @@ def print_action_plan(plan: ActionPlan, skip_explanation: bool = False):
     console.print()
 
 
-def _show_colored_diff(workspace_dir: Path, files: list[str]):
-    """展示有修改的文件的彩色 diff 预览。"""
+async def _show_colored_diff(workspace_dir: Path, files: list[str]):
+    """展示有修改的文件的 diff 预览。"""
     if not files:
         return
-    for filename in files:
-        filepath = workspace_dir / filename
-        if not filepath.exists():
-            continue
-        # 尝试从 undo_manager 获取旧内容？不，undo_manager 不能这样直接查。
-        # 用 git diff 更通用
-    # 统一用 git diff -- 展示所有变更
-    result = _exec_shell("git diff --no-color", workspace_dir, timeout=15)
+    # 只对本次修改的文件做 git diff，避免整仓库扫描
+    quoted = [f'"{f}"' for f in files]
+    result = await _exec_shell(
+        "git diff --no-color -- " + " ".join(quoted), workspace_dir, timeout=15
+    )
     if not result or "退出码" in result:
         return
     # 简化为只显示修改摘要
-    stat = _exec_shell("git diff --stat", workspace_dir, timeout=10)
+    stat = await _exec_shell(
+        "git diff --stat -- " + " ".join(quoted), workspace_dir, timeout=10
+    )
     if (
         stat
         and "退出码" not in stat
@@ -495,15 +489,11 @@ def show_history(deps: WorkspaceDeps):
     console.print(f"[cyan]{result}[/cyan]")
 
 
-def _exec_shell(command: str, cwd: Path, timeout: int = 120) -> str:
+async def _exec_shell(command: str, cwd: Path, timeout: int = 120) -> str:
     try:
-        result = subprocess.run(
+        result = await run_subprocess(
             command,
             shell=True,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=timeout,
             cwd=str(cwd),
         )
@@ -517,21 +507,17 @@ def _exec_shell(command: str, cwd: Path, timeout: int = 120) -> str:
         if result.returncode != 0:
             output += f"\n退出码: {result.returncode}"
         return output if output else "(命令执行成功，无输出)"
-    except subprocess.TimeoutExpired:
+    except TimeoutError:
         return f"错误: 命令执行超时 ({timeout}秒)"
     except Exception as e:
         return f"错误: 命令执行失败 - {e}"
 
 
-def _exec_shell_args(args: list[str], cwd: Path, timeout: int = 120) -> str:
+async def _exec_shell_args(args: list[str], cwd: Path, timeout: int = 120) -> str:
     """参数列表形式执行命令（不经 shell），避免参数内容被解释为 shell 命令。"""
     try:
-        result = subprocess.run(
+        result = await run_subprocess(
             args,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=timeout,
             cwd=str(cwd),
         )
@@ -545,7 +531,7 @@ def _exec_shell_args(args: list[str], cwd: Path, timeout: int = 120) -> str:
         if result.returncode != 0:
             output += f"\n退出码: {result.returncode}"
         return output if output else "(命令执行成功，无输出)"
-    except subprocess.TimeoutExpired:
+    except TimeoutError:
         return f"错误: 命令执行超时 ({timeout}秒)"
     except Exception as e:
         return f"错误: 命令执行失败 - {e}"
@@ -554,7 +540,7 @@ def _exec_shell_args(args: list[str], cwd: Path, timeout: int = 120) -> str:
 async def _generate_commit_message(
     http_client: httpx.AsyncClient, config: dict, diff: str
 ) -> str:
-    diff_stat = _exec_shell("git diff --cached --stat", config["workspace_dir"])
+    diff_stat = await _exec_shell("git diff --cached --stat", config["workspace_dir"])
     try:
         response = await http_client.post(
             f"{config['base_url']}/chat/completions",
@@ -614,6 +600,10 @@ def _build_proxy_mounts(config: dict) -> dict:
 
 def _build_managers(config: dict):
     """构建权限、skills、子代理、MCP 等运行时组件。"""
+    from .skills import SkillsManager
+    from .subagents import SubAgentManager
+    from .mcp_manager import load_mcp_toolsets
+
     workspace_dir = config["workspace_dir"].resolve()
     project_config = load_project_config(workspace_dir)
     config = apply_project_settings(config, project_config)
@@ -711,6 +701,7 @@ async def _run_with_narration(
     便于协作开发确认 AI 没有走偏。返回 (all_messages, plan, usage)。
     """
     from pydantic_ai.messages import TextPart, ThinkingPart, ToolCallPart
+    from pydantic_ai.usage import UsageLimits
 
     status_paused = False
 
@@ -812,21 +803,23 @@ async def _run_status_loop(
     return all_messages, plan
 
 
-GOAL_PERSIST_INSTRUCTION = """你正处于 /goal 目标模式。上下文可能被自动压缩，为确保持续工作不丢失进度，请严格遵循以下文件持久化规范：
+GOAL_PERSIST_INSTRUCTION = """You are in /goal mode. Context may be auto-compressed, so to keep working without losing progress, strictly follow this persistence protocol:
 
-1. 在本工作区根目录维护三个持久化文件（若不存在则创建，已存在则先读取再更新）：
-   - goal.md  记录：目标定义、验收标准、当前完成状态、已完成/未完成的事项
-   - plan.md  记录：整体实施计划、当前阶段方案、关键决策与理由
-   - todo.md  记录：任务清单，未完成项用 `- [ ]` 标记，已完成项用 `- [x]` 标记，并附简短说明
+1. Maintain three persistent files in the workspace root (create them if missing; read then update if they exist):
+   - goal.md  records: the goal definition, acceptance criteria, current completion status, done/not-done items
+   - plan.md  records: the overall implementation plan, current phase approach, key decisions and reasons
+   - todo.md  records: the task checklist, unfinished items marked with `- [ ]`, finished items with `- [x]`, each with a short note
 
-2. 每轮工作开始时，先读取这三个文件，基于其内容继续推进（尤其当对话历史被压缩后，这三个文件是你的唯一可靠记忆）。
+2. At the start of each round, read these three files first and continue based on their content (especially after the conversation history is compressed — these files are your only reliable memory).
 
-3. 每完成一个重要步骤，立即同步更新对应文件，确保文件永远反映最新进度，文字简洁但信息完整。
+3. After each important step, immediately update the corresponding file so they always reflect the latest progress. Keep it concise but complete.
 
-4. 在最终回复的 ActionPlan 中，说明你更新了哪些持久化文件、当前处于什么阶段。"""
+4. In your final ActionPlan, state which persistent files you updated and what phase you are in.
+
+Do not overthink this: just keep the files accurate and move on."""
 
 
-def _track_goal_files(workspace_dir: Path, iteration: int) -> str:
+async def _track_goal_files(workspace_dir: Path, iteration: int) -> str:
     """将 goal 持久化文件 (goal.md/plan.md/todo.md) 提交到 git 作为进度检查点。
 
     仅当目录是 git 仓库且这些文件有变更时才提交，不影响其他工作区文件。
@@ -834,7 +827,7 @@ def _track_goal_files(workspace_dir: Path, iteration: int) -> str:
     """
     if not (workspace_dir / ".git").exists():
         return ""
-    check = _exec_shell("git rev-parse --is-inside-work-tree", workspace_dir, 10)
+    check = await _exec_shell("git rev-parse --is-inside-work-tree", workspace_dir, 10)
     if "true" not in check:
         return ""
     files = [
@@ -842,7 +835,7 @@ def _track_goal_files(workspace_dir: Path, iteration: int) -> str:
     ]
     if not files:
         return ""
-    status = _exec_shell_args(
+    status = await _exec_shell_args(
         ["git", "status", "--short", "--"] + files, workspace_dir, 10
     )
     if (
@@ -852,11 +845,11 @@ def _track_goal_files(workspace_dir: Path, iteration: int) -> str:
         or "无输出" in status
     ):
         return ""
-    add = _exec_shell_args(["git", "add", "--"] + files, workspace_dir, 10)
+    add = await _exec_shell_args(["git", "add", "--"] + files, workspace_dir, 10)
     if "退出码" in add:
         return ""
     msg = f"goal: 第 {iteration} 轮进度 (goal.md/plan.md/todo.md)"
-    result = _exec_shell_args(
+    result = await _exec_shell_args(
         ["git", "commit", "-m", msg, "--"] + files, workspace_dir, 10
     )
     return result
@@ -903,9 +896,11 @@ async def _run_goal_loop(
     把验收反馈作为后续指令交给主 AI 继续工作，循环直到验收通过或达到上限。
     """
     from .goal import create_goal_verifier, verify_goal
+    from .context_compressor import TokenEstimator
 
     verifier = create_goal_verifier(config, deps.http_client)
     max_context_tokens = config.get("max_context_tokens", 100000)
+    token_estimator = TokenEstimator()
 
     for iteration in range(1, max_iterations + 1):
         console.print()
@@ -918,16 +913,18 @@ async def _run_goal_loop(
         )
 
         deps.tool_tracker.reset()
-        work_prompt = f"请完成以下目标：\n\n{goal}\n\n{GOAL_PERSIST_INSTRUCTION}"
+        work_prompt = (
+            f"Complete the following goal:\n\n{goal}\n\n{GOAL_PERSIST_INSTRUCTION}"
+        )
         all_messages, plan = await _run_status_loop(
             agent, work_prompt, all_messages, deps, config
         )
 
-        from .context_compressor import compress_messages, estimate_message_tokens
+        from .context_compressor import compress_messages
 
         if (
             len(all_messages) > 50
-            or estimate_message_tokens(all_messages) > max_context_tokens
+            or token_estimator.estimate(all_messages) > max_context_tokens
         ):
             with console.status("[dim]智能压缩上下文中...[/dim]", spinner="fox"):
                 all_messages, summary_text = await compress_messages(
@@ -943,7 +940,7 @@ async def _run_goal_loop(
         )
         print_action_plan(plan)
 
-        track_result = _track_goal_files(deps.workspace_dir, iteration)
+        track_result = await _track_goal_files(deps.workspace_dir, iteration)
         if track_result:
             console.print(f"  [dim]git 已追踪本轮 goal 文件: {track_result}[/dim]")
 
@@ -994,10 +991,10 @@ async def _run_goal_loop(
                 parts=[
                     UserPromptPart(
                         content=(
-                            "独立验收 AI 判定上述目标尚未完成。请根据以下验收反馈继续工作，"
-                            "直到目标真正达成：\n\n"
-                            f"验收结论: {verification.reason}\n"
-                            f"未达标事项:\n{gaps_text}"
+                            "An independent verification AI determined the goal above is not yet complete. "
+                            "Keep working according to the following feedback until the goal is actually achieved:\n\n"
+                            f"Verdict: {verification.reason}\n"
+                            f"Outstanding items:\n{gaps_text}"
                         )
                     )
                 ]
@@ -1009,7 +1006,7 @@ async def _run_goal_loop(
     return all_messages
 
 
-def _save_session(session_manager: SessionManager, all_messages: list):
+def _save_session(session_manager, all_messages: list):
     if all_messages:
         name = session_manager.get_auto_save_name()
         session_manager.save_session(name, all_messages)
@@ -1024,6 +1021,10 @@ async def _run_headless(
     mcp_toolsets,
     args,
 ):
+    from .models import WorkspaceDeps, UndoManager
+    from .agent import create_agent
+    from pydantic_ai.exceptions import UnexpectedModelBehavior, ModelHTTPError
+
     prompt = args.prompt
     if prompt is None and not sys.stdin.isatty():
         prompt = sys.stdin.read()
@@ -1130,6 +1131,16 @@ async def _run_headless(
 
 
 async def _run_interactive(config: dict, args):
+    from .models import WorkspaceDeps, UndoManager
+    from .agent import create_agent
+    from .session import SessionManager
+    from .context_compressor import TokenEstimator
+    from pydantic_ai.exceptions import (
+        UnexpectedModelBehavior,
+        ModelHTTPError,
+        ModelAPIError,
+    )
+
     workspace_dir = config["workspace_dir"].resolve()
     workspace_dir.mkdir(parents=True, exist_ok=True)
     if not workspace_dir.is_dir():
@@ -1196,6 +1207,7 @@ async def _run_interactive(config: dict, args):
         all_messages = []
         max_history_messages = 50
         max_context_tokens = config.get("max_context_tokens", 100000)
+        token_estimator = TokenEstimator()
 
         terminal_mode = False
         terminal_cwd = workspace_dir
@@ -1203,14 +1215,7 @@ async def _run_interactive(config: dict, args):
 
         # 初始化 prompt_toolkit session
         history_file = workspace_dir / ".foxcode" / "history"
-        if _PROMPT_TOOLKIT_AVAILABLE and PromptSession is not None:
-            pt_session = PromptSession(
-                completer=FoxCodeCompleter(),
-                history=FileHistory(str(history_file)) if FileHistory else None,
-                multiline=False,
-            )
-        else:
-            pt_session = DummyPromptSession()
+        pt_session = _make_prompt_session(history_file)
 
         # 自动加载默认命令文件
         # 若文件以 [Command] 开头：其后每一行作为命令在启动时逐条执行
@@ -1646,10 +1651,10 @@ async def _run_interactive(config: dict, args):
                         parts = cmd.split(maxsplit=1)
                         msg = parts[1] if len(parts) > 1 else ""
                         console.print("[dim]暂存所有变更...[/dim]")
-                        add_result = _exec_shell(
+                        add_result = await _exec_shell(
                             "git add .", workspace_dir, config["shell_timeout"]
                         )
-                        diff = _exec_shell(
+                        diff = await _exec_shell(
                             "git diff --cached",
                             workspace_dir,
                             config["shell_timeout"],
@@ -1665,14 +1670,14 @@ async def _run_interactive(config: dict, args):
                             console.print("[yellow]没有检测到变更，无需提交[/yellow]")
                             continue
                         if msg:
-                            result = _exec_shell_args(
+                            result = await _exec_shell_args(
                                 ["git", "commit", "-m", msg],
                                 workspace_dir,
                                 config["shell_timeout"],
                             )
                             console.print(f"[green]{result}[/green]")
                         else:
-                            stat = _exec_shell(
+                            stat = await _exec_shell(
                                 "git diff --cached --stat",
                                 workspace_dir,
                                 config["shell_timeout"],
@@ -1688,7 +1693,7 @@ async def _run_interactive(config: dict, args):
                                 console.print(
                                     f"[green]生成提交信息:[/green] [bold]{ai_msg}[/bold]"
                                 )
-                                result = _exec_shell_args(
+                                result = await _exec_shell_args(
                                     ["git", "commit", "-m", ai_msg],
                                     workspace_dir,
                                     config["shell_timeout"],
@@ -1702,7 +1707,7 @@ async def _run_interactive(config: dict, args):
                                     "[bold cyan]提交信息: [/bold cyan]"
                                 ).strip()
                                 if manual_msg:
-                                    result = _exec_shell_args(
+                                    result = await _exec_shell_args(
                                         ["git", "commit", "-m", manual_msg],
                                         workspace_dir,
                                         config["shell_timeout"],
@@ -1732,14 +1737,14 @@ async def _run_interactive(config: dict, args):
                     send_prompt = _expand_file_refs(prompt, workspace_dir)
                     if pending_skill:
                         send_prompt = (
-                            f"请先阅读以下 skill 内容并严格遵循其中的指导：\n\n"
+                            f"Please read the following skill content first and strictly follow its guidance:\n\n"
                             f"---\n{pending_skill}\n---\n\n{send_prompt}"
                         )
                         pending_skill = None
                     if deps.plan_mode:
                         send_prompt = (
-                            "[计划模式] 请只使用只读工具调查，不要修改文件或执行命令。"
-                            "调查后请在 ActionPlan 中给出清晰的分步实施计划。\n\n"
+                            "[Plan mode] Use only read-only tools to investigate; do not modify files or run commands. "
+                            "After investigating, give a clear step-by-step implementation plan in the ActionPlan.\n\n"
                             + send_prompt
                         )
 
@@ -1750,14 +1755,11 @@ async def _run_interactive(config: dict, args):
                         agent, send_prompt, all_messages, deps, config
                     )
 
-                    from .context_compressor import (
-                        compress_messages,
-                        estimate_message_tokens,
-                    )
+                    from .context_compressor import compress_messages
 
                     if (
                         len(all_messages) > max_history_messages
-                        or estimate_message_tokens(all_messages) > max_context_tokens
+                        or token_estimator.estimate(all_messages) > max_context_tokens
                     ):
                         with console.status(
                             "[dim]智能压缩上下文中...[/dim]", spinner="fox"
@@ -1775,7 +1777,7 @@ async def _run_interactive(config: dict, args):
                     print_action_plan(plan)
                     # 展示本轮变更摘要
                     if plan.files_modified:
-                        _show_colored_diff(workspace_dir, plan.files_modified)
+                        await _show_colored_diff(workspace_dir, plan.files_modified)
 
                     usage_summary = deps.tool_tracker.usage_summary(config["model"])
                     if usage_summary:

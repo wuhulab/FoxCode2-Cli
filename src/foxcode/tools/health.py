@@ -1,12 +1,11 @@
 """项目健康检查工具：检查项目依赖、测试、配置等是否完整。"""
 
-import subprocess
 from pathlib import Path
 
 from pydantic_ai import RunContext
 
 from ..models import WorkspaceDeps
-from . import log_tool, permission_validator
+from . import log_tool, permission_validator, run_subprocess
 
 
 CHECKS = {
@@ -79,13 +78,10 @@ def _has_pattern(workspace_dir: Path, patterns: list[str]) -> tuple[bool, str]:
     return False, ""
 
 
-def _check_git(workspace_dir: Path) -> str:
+async def _check_git(workspace_dir: Path) -> str:
     try:
-        result = subprocess.run(
+        result = await run_subprocess(
             ["git", "status", "--short"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
             timeout=10,
             cwd=str(workspace_dir),
         )
@@ -162,7 +158,7 @@ def register(agent):
         lines.append("")
 
         # 3. Git 状态
-        lines.append(_check_git(workspace_dir))
+        lines.append(await _check_git(workspace_dir))
         lines.append("")
 
         # 4. 测试

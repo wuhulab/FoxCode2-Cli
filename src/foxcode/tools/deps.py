@@ -1,8 +1,7 @@
-import subprocess
 from pathlib import Path
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
-from . import log_tool, permission_validator
+from . import log_tool, permission_validator, run_subprocess
 
 
 def _detect_package_manager(workspace_dir: Path) -> str | None:
@@ -23,14 +22,10 @@ def _detect_package_manager(workspace_dir: Path) -> str | None:
     return None
 
 
-def _run_cmd(cwd: Path, cmd: list[str], timeout: int = 120) -> tuple[str, int]:
+async def _run_cmd(cwd: Path, cmd: list[str], timeout: int = 120) -> tuple[str, int]:
     try:
-        result = subprocess.run(
+        result = await run_subprocess(
             cmd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=timeout,
             cwd=str(cwd),
         )
@@ -42,7 +37,7 @@ def _run_cmd(cwd: Path, cmd: list[str], timeout: int = 120) -> tuple[str, int]:
                 output += "\n"
             output += f"[stderr]\n{result.stderr}"
         return output, result.returncode
-    except subprocess.TimeoutExpired:
+    except TimeoutError:
         return f"错误: 命令执行超时 ({timeout}秒)", -1
     except FileNotFoundError:
         return f"错误: 找不到命令 {cmd[0]}，请确保已安装", -1
@@ -110,7 +105,7 @@ def register(agent):
         else:
             return f"错误: 不支持的包管理器: {detected}"
 
-        output, code = _run_cmd(workspace_dir, cmd, ctx.deps.shell_timeout * 3)
+        output, code = await _run_cmd(workspace_dir, cmd, ctx.deps.shell_timeout * 3)
         summary = f"\n[退出码: {code}]"
         if code == 0:
             summary += " ✅ 依赖安装成功"

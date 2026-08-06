@@ -1,5 +1,6 @@
 """智能上下文压缩：长对话自动摘要，保留关键信息减少 token 消耗。"""
 
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -56,6 +57,28 @@ def estimate_message_tokens(messages: list[Any]) -> int:
     return total_chars // 4
 
 
+@dataclass
+class TokenEstimator:
+    """增量 token 估算器：只对新追加的消息做序列化，避免每轮全量重算。
+
+    当消息列表被压缩/缩短时自动重建基线。
+    """
+
+    _msg_count: int = 0
+    _char_count: int = 0
+
+    def estimate(self, messages: list[Any]) -> int:
+        start = self._msg_count
+        if len(messages) < start:
+            # 列表被压缩/替换，重建基线
+            start = 0
+            self._char_count = 0
+        for msg in messages[start:]:
+            self._char_count += len(_extract_text(msg))
+        self._msg_count = len(messages)
+        return self._char_count // 4
+
+
 async def compress_messages(
     messages: list[Any],
     http_client: httpx.AsyncClient,
@@ -73,18 +96,20 @@ async def compress_messages(
 
     total = len(messages)
     first_chunk = messages[:KEEP_FIRST_MESSAGES]
-    middle_chunk = messages[KEEP_FIRST_MESSAGES:total - KEEP_LAST_MESSAGES]
-    last_chunk = messages[total - KEEP_LAST_MESSAGES:]
+    middle_chunk = messages[KEEP_FIRST_MESSAGES : total - KEEP_LAST_MESSAGES]
+    last_chunk = messages[total - KEEP_LAST_MESSAGES :]
 
     if not middle_chunk:
         return messages, ""
 
     # 将中间的消息转为文本用于摘要
-    lines = ["以下是对话历史摘要，请基于这些信息继续协助用户:\n"]
+    lines = [
+        "Below is the conversation history to be summarized. Use this summary to keep assisting the user:\n"
+    ]
     for i, msg in enumerate(middle_chunk, 1):
         text = _extract_text(msg)
         # 截断过长的工具返回
-        lines.append(f"--- 消息 {i} ---\n{text[:800]}\n")
+        lines.append(f"--- message {i} ---\n{text[:800]}\n")
 
     prompt_text = "\n".join(lines)
 
@@ -97,9 +122,11 @@ async def compress_messages(
                     {
                         "role": "system",
                         "content": (
-                            "你是一个对话摘要助手。请将以下对话历史压缩为简洁的摘要，"
-                            "保留所有关键信息：用户的问题、AI 采取的操作、重要的代码修改、"
-                            "决策和结论。用最少的文字传达最多的信息。"
+                            "You are a conversation summarizer. Compress the following conversation history "
+                            "into a concise summary that preserves all key information: the user's questions, "
+                            "the AI's actions, important code changes, decisions, and conclusions. "
+                            "Convey the most information with the fewest words. Do not overthink; produce "
+                            "the summary directly."
                         ),
                     },
                     {"role": "user", "content": prompt_text},

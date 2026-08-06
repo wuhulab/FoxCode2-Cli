@@ -1,9 +1,8 @@
-import subprocess
 import sys
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
 from ..tools.file_ops import _resolve_safe_path
-from . import log_tool, permission_validator
+from . import log_tool, permission_validator, run_subprocess
 from .security import check_shell_security, format_security_warnings
 
 
@@ -18,15 +17,11 @@ def register(agent):
             ctx.deps.console.print(warning)
         filepath = ctx.deps.workspace_dir
         try:
-            result = subprocess.run(
+            result = await run_subprocess(
                 command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
                 timeout=ctx.deps.shell_timeout,
                 cwd=str(filepath),
+                shell=True,
             )
             output = ""
             if result.stdout:
@@ -38,7 +33,7 @@ def register(agent):
             if result.returncode != 0:
                 output += f"\n退出码: {result.returncode}"
             return output if output else "(命令执行成功，无输出)"
-        except subprocess.TimeoutExpired:
+        except TimeoutError:
             return f"错误: 命令执行超时 ({ctx.deps.shell_timeout}秒)"
         except Exception as e:
             return f"错误: 命令执行失败 - {e}"
@@ -68,12 +63,8 @@ def register(agent):
             return f"错误: 不支持的文件类型 {ext}，请使用 run_shell 来执行"
         try:
             cmd = [*interpreter, str(filepath)]
-            result = subprocess.run(
+            result = await run_subprocess(
                 cmd,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
                 timeout=ctx.deps.shell_timeout,
                 cwd=str(ctx.deps.workspace_dir),
             )
@@ -87,7 +78,7 @@ def register(agent):
             if result.returncode != 0:
                 output += f"\n退出码: {result.returncode}"
             return output if output else "(执行成功，无输出)"
-        except subprocess.TimeoutExpired:
+        except TimeoutError:
             return f"错误: 执行超时 ({ctx.deps.shell_timeout}秒)"
         except FileNotFoundError:
             return f"错误: 找不到解释器来运行 {ext} 文件，请确保已安装相应的运行环境"

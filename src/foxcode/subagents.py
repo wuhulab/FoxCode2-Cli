@@ -62,7 +62,8 @@ class SubAgentManager:
             self.defs[name] = SubAgentDef(
                 name=name,
                 description=desc,
-                system_prompt=body.strip() or f"你是名为 {name} 的专用子代理。",
+                system_prompt=body.strip()
+                or f"You are a dedicated subagent named {name}.",
                 path=f,
                 model=model,
                 tools=tools,
@@ -133,36 +134,9 @@ def create_subagent_agent(
         retries=3,
     )
 
-    from .tools import (
-        copy_file,
-        deps,
-        fetch,
-        file_ops,
-        format as fmt,
-        git,
-        grep,
-        search,
-        shell,
-        tests,
-        tree,
-        undo,
-    )
+    from .tools import register_core_tools
 
-    for mod in (
-        file_ops,
-        shell,
-        search,
-        undo,
-        git,
-        grep,
-        fetch,
-        tree,
-        copy_file,
-        tests,
-        fmt,
-        deps,
-    ):
-        mod.register(child)
+    register_core_tools(child)
 
     return child
 
@@ -209,14 +183,16 @@ async def run_subagent(
             return f"错误: 未找到子代理 '{agent_name}'，可用: {available}"
 
     system_prompt = (
-        f"你是子代理 {definition.name}，负责完成上级分配的任务。\n"
-        f"职责: {definition.description}\n"
-        f"请只使用只读工具收集信息，然后用简洁的中文总结关键结论返回。\n\n"
+        f"You are subagent {definition.name}, responsible for the task delegated by the parent agent.\n"
+        f"Role: {definition.description}\n"
+        f"Use only read-only tools to gather information, then return the key findings in a concise summary.\n\n"
         f"{definition.system_prompt}"
         if definition
         else (
-            "你是一个只读探索子代理。请使用只读工具调查并回答上级的问题，"
-            "用简洁的中文总结关键结论返回。不要修改任何文件，不要执行写操作。"
+            "You are a read-only exploration subagent. Use read-only tools to investigate and answer "
+            "the parent's question, then return a concise summary of the key findings. "
+            "Do not modify any files or perform write operations. Do not overthink; investigate "
+            "efficiently and report the essentials."
         )
     )
 

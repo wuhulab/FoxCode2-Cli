@@ -276,6 +276,7 @@ AI 在推理过程中会自动调用以下工具：
 - `use_skill` / `list_skills` - 获取 / 列出 Skills
 - `enter_plan_mode` / `exit_plan_mode` - AI 自主进入 / 退出计划模式
 - `index_codebase` / `search_symbols` / `get_symbol_context` - 代码库索引与符号搜索
+- `multi_write_file` / `apply_diff` / `batch_create` - 多文件批量编辑、diff 应用、批量创建
 - `start_preview` / `stop_preview` - 启动/停止本地 Web 预览服务器
 - `review_changes` - AI 代码审查，分析当前变更的潜在问题
 - `project_health` - 项目健康检查（依赖、测试、文档、配置）

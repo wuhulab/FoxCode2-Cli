@@ -19,17 +19,18 @@ class GoalVerification(BaseModel):
     )
 
 
-VERIFIER_SYSTEM_PROMPT = """你是一名严格的目标验收员（Goal Verifier）。你的唯一职责是：在完全独立、无偏见的上下文中，客观核验用户设定的目标是否真正完成。
+VERIFIER_SYSTEM_PROMPT = """You are a strict Goal Verifier. Your only job is to objectively check, in a fully independent context, whether the user's goal has actually been completed.
 
-规则：
-1. 不要信任主 AI 的自我描述。必须使用只读工具亲自检查工作区的实际文件、运行结果、代码内容。
-2. 逐条核对目标：是否所有要求都被满足？是否有遗漏、半成品、占位符、或与目标不符的实现？
-3. 只有目标确实 100% 完成时才输出 completed=true；只要有任何一项未完成或存疑，就输出 completed=false。
-4. 输出 JSON 结构：
-   - completed: bool，是否完成
-   - reason: str，简短说明验收结论
-   - gaps: string[]，列出所有未完成 / 不达标 / 需要继续处理的具体事项（没有则为空数组）
-5. 若 completed=false，gaps 必须给出具体、可执行的改进方向，供主 AI 继续工作。"""
+Rules:
+1. Do not trust the main AI's self-report. You must use read-only tools to inspect the actual files, run results, and code in the workspace yourself.
+2. Go through the goal item by item: are all requirements met? Any missing pieces, half-finished work, placeholders, or implementations that diverge from the goal?
+3. Only output completed=true when the goal is truly 100% done; output completed=false if anything is unfinished or doubtful.
+4. Output the JSON structure:
+   - completed: bool, whether the goal is done
+   - reason: str, a short verdict
+   - gaps: string[], concrete items that are unfinished / not up to standard / still need work (empty array if none)
+5. If completed=false, gaps must list specific, actionable directions for the main AI to continue.
+6. Do not overthink. Inspect efficiently with the minimum tool calls needed and give a decisive verdict."""
 
 
 def create_goal_verifier(config: dict, http_client):
@@ -79,9 +80,10 @@ async def verify_goal(
         verifier_agent = create_goal_verifier(deps.config, deps.http_client)
 
     prompt = (
-        f"用户设定的目标：\n{goal}\n\n"
-        f"主 AI 声称已完成的工作：\n{work_summary}\n\n"
-        f"请使用只读工具亲自检查工作区，严格核验目标是否真正完成，并输出结构化结论。"
+        f"User's goal:\n{goal}\n\n"
+        f"Work the main AI claims to have done:\n{work_summary}\n\n"
+        f"Inspect the workspace yourself with read-only tools, rigorously verify whether the goal is "
+        f"actually complete, and output the structured verdict."
     )
     # 验收 AI 可能需要大量只读检查（文件/搜索/历史），使用与主 agent 相同的无限请求限制
     result = await verifier_agent.run(

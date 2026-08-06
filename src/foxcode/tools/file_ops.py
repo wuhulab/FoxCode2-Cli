@@ -5,11 +5,17 @@ from ..models import WorkspaceDeps
 from . import log_tool, permission_validator
 from .security import check_content_security, format_security_warnings
 
+# 缓存已解析的工作区路径（同一 workspace 的多次文件操作无需重复 resolve）
+_workspace_norm_cache: dict[str, str] = {}
+
 
 def _resolve_safe_path(workspace_dir: Path, filename: str) -> Path:
     resolved = (workspace_dir / filename).resolve()
-    workspace_resolved = workspace_dir.resolve()
-    workspace_norm = os.path.normcase(str(workspace_resolved))
+    ws_key = str(workspace_dir)
+    workspace_norm = _workspace_norm_cache.get(ws_key)
+    if workspace_norm is None:
+        workspace_norm = os.path.normcase(str(workspace_dir.resolve()))
+        _workspace_norm_cache[ws_key] = workspace_norm
     resolved_norm = os.path.normcase(str(resolved))
     if resolved_norm == workspace_norm:
         return resolved
@@ -64,18 +70,23 @@ def register(agent):
         if not filepath.is_file():
             return f"错误: {filename} 不是一个文件"
         try:
+            from itertools import islice
+
+            total = 0
             with filepath.open("r", encoding="utf-8", errors="replace") as f:
-                lines = f.readlines()
+                # 逐行读取，快速跳过起始行，不加载整个文件到内存
+                skipped = islice(f, max(0, start_line - 1), None)
+                selected = list(islice(skipped, max(0, end_line - start_line + 1)))
+                f.seek(0)
+                total = sum(1 for _ in f)
         except Exception as e:
             return f"错误: 读取文件失败 - {e}"
-        total = len(lines)
         if start_line < 1:
             start_line = 1
         if end_line == 0 or end_line > total:
             end_line = total
         if start_line > total:
             return f"错误: 起始行 {start_line} 超出文件总行数 {total}"
-        selected = lines[start_line - 1:end_line]
         output = "".join(selected)
         ctx.deps.tool_tracker.add_chars(len(output))
         header = f"[文件 {filename} 第 {start_line}-{end_line} 行 / 共 {total} 行]\n"
@@ -257,6 +268,9 @@ def register(agent):
                     except OSError:
                         size = 0
                     lines.append(f"{rel_path} ({size} bytes)")
+                if len(lines) >= 500:
+                    lines.append("... (条目过多，仅展示前 500 项)")
+                    break
         except Exception as e:
             return f"错误: 列出文件失败 - {e}"
         return "\n".join(lines) if lines else f"路径 {path} 为空"

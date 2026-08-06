@@ -1,12 +1,11 @@
 import re
-import subprocess
 from pathlib import Path
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
-from . import log_tool, permission_validator
+from . import log_tool, permission_validator, run_subprocess
 
 
-def _run_ripgrep(
+async def _run_ripgrep(
     cwd: Path,
     pattern: str,
     path: str = "",
@@ -40,12 +39,8 @@ def _run_ripgrep(
         args.append(str(cwd.resolve()).replace("\\", "/"))
 
     try:
-        result = subprocess.run(
+        result = await run_subprocess(
             args,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=30,
             cwd=str(cwd),
         )
@@ -59,7 +54,7 @@ def _run_ripgrep(
         return output if output else f"未找到匹配 '{pattern}' 的结果"
     except FileNotFoundError:
         return None  # fallback to python
-    except subprocess.TimeoutExpired:
+    except TimeoutError:
         return "错误: 搜索超时"
     except Exception as e:
         return f"错误: 搜索失败 - {e}"
@@ -139,7 +134,7 @@ def register(agent):
         case_sensitive: bool = False,
     ) -> str:
         log_tool(ctx, "search_in_files", f'"{pattern}"')
-        result = _run_ripgrep(
+        result = await _run_ripgrep(
             ctx.deps.workspace_dir,
             pattern,
             path,
@@ -148,7 +143,10 @@ def register(agent):
             case_sensitive,
         )
         if result is None:
-            result = _python_grep(
+            import asyncio
+
+            result = await asyncio.to_thread(
+                _python_grep,
                 ctx.deps.workspace_dir,
                 pattern,
                 path,

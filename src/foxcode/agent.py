@@ -46,19 +46,23 @@ def create_agent(
     if project_instructions:
         system_prompt += (
             "\n\n---\n"
-            "## 项目指南\n"
-            "以下是项目提供的指南，请严格遵守：\n"
+            "## Project Guidelines\n"
+            "The following guidelines are provided by the project and must be strictly followed:\n"
             f"{project_instructions}"
         )
 
     if skills_list:
-        lines = ["\n\n---\n## 可用 Skills（用 list_skills / use_skill 按需获取内容）"]
+        lines = [
+            "\n\n---\n## Available Skills (load content on demand with list_skills / use_skill)"
+        ]
         for name, desc in skills_list:
             lines.append(f"- {name}: {desc}")
         system_prompt += "\n".join(lines)
 
     if subagent_list:
-        lines = ["\n\n---\n## 可用子代理（用 task 工具指定 agent 参数调用）"]
+        lines = [
+            "\n\n---\n## Available Subagents (invoke with the task tool, specifying the agent argument)"
+        ]
         for name, desc in subagent_list:
             lines.append(f"- {name}: {desc}")
         system_prompt += "\n".join(lines)
@@ -76,48 +80,9 @@ def create_agent(
         retries=3,
     )
 
-    from .tools import (
-        code_index,
-        copy_file,
-        deps,
-        fetch,
-        file_ops,
-        format as fmt,
-        git,
-        grep,
-        search,
-        shell,
-        tests,
-        tree,
-        undo,
-    )
-    from .tools import mode
-    from .tools import preview
-    from .tools import review
-    from .tools import health
-    from .tools import lsp_bridge
+    from .tools import register_all_tools
 
-    for mod in (
-        file_ops,
-        shell,
-        search,
-        undo,
-        git,
-        grep,
-        fetch,
-        tree,
-        copy_file,
-        tests,
-        fmt,
-        deps,
-        mode,
-        code_index,
-        preview,
-        review,
-        health,
-        lsp_bridge,
-    ):
-        mod.register(agent)
+    register_all_tools(agent)
 
     from . import skills, subagents
 

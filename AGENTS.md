@@ -62,6 +62,11 @@ foxcode/
 5. 返回字符串结果（错误以 `"错误:"` 前缀开头）
 6. 文件操作使用 `_resolve_safe_path` 防止路径越权
 
+工具注册统一通过 `tools/__init__.py` 的 `register_core_tools(agent)`（主代理与子代理共享的核心 12 模块）
+与 `register_all_tools(agent)`（主代理全量注册）完成，避免注册列表在多个文件中漂移。
+新增核心读/写工具时加入 `_CORE_TOOLS` 元组即可同时注册到主代理与子代理。
+阻塞型子进程调用统一使用 `run_subprocess()`（内部 `asyncio.to_thread`），避免冻结事件循环。
+
 ```python
 def register(agent):
     @agent.tool(args_validator=permission_validator("tool_name"))
@@ -74,7 +79,7 @@ def register(agent):
 ### 新增工具步骤
 
 1. 在 `tools/` 下创建模块，实现 `register(agent)`
-2. 在 `agent.py` 中导入并注册
+2. 核心读/写工具加入 `tools/__init__.py` 的 `_CORE_TOOLS` 元组；主代理增强工具加入 `register_all_tools`
 3. 在 `models.py` 的 `STATUS_NAMES` 和 `COUNT_LABELS` 中添加状态名
 4. 如果涉及写操作，在 `permissions.py` 的 `WRITE_TOOLS` 中添加
 5. 在 `system_prompt.md` 中更新规则说明

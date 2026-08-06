@@ -76,6 +76,12 @@ BUILTIN_DANGEROUS: list[tuple[str, str]] = [
     (r"\brm\s+-rf\s+(~|%USERPROFILE%)", "删除用户主目录"),
 ]
 
+# 预编译高危命令正则，避免每次权限检查时重新编译
+_COMPILED_DANGEROUS: list[tuple[re.Pattern, str]] = [
+    (re.compile(pattern, re.IGNORECASE), reason)
+    for pattern, reason in BUILTIN_DANGEROUS
+]
+
 # 敏感文件读取模式：匹配这些文件路径的读取操作需要确认
 _SENSITIVE_PATTERNS = [
     r"\.env",
@@ -256,9 +262,9 @@ class PermissionManager:
     def _matches_dangerous(self, tool_name: str, target: str) -> str | None:
         if tool_name not in ("run_shell", "run_file", "install_deps", "run_tests"):
             return None
-        for pattern, reason in BUILTIN_DANGEROUS:
+        for pattern, reason in _COMPILED_DANGEROUS:
             try:
-                if re.search(pattern, target, re.IGNORECASE):
+                if pattern.search(target):
                     return reason
             except re.error:
                 continue
@@ -388,10 +394,10 @@ class PermissionManager:
         if decision == "deny":
             if self.plan_mode:
                 return (
-                    "权限被拒绝: 当前处于计划模式，禁止执行写/修改操作。"
-                    "请只使用只读工具探索并给出方案。"
+                    "Permission denied: you are in plan mode, write/modify operations are not allowed. "
+                    "Use only read-only tools to explore and produce a plan."
                 )
-            return f"权限被拒绝: {tool_name} 不允许执行"
+            return f"Permission denied: {tool_name} is not allowed"
 
         if decision == "ask":
             if self.headless:

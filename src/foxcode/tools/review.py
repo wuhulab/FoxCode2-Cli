@@ -5,23 +5,17 @@ from pathlib import Path
 from pydantic_ai import RunContext
 
 from ..models import WorkspaceDeps
-from . import log_tool, permission_validator
+from . import log_tool, permission_validator, run_subprocess
 
 
-def _get_git_diff(cwd: Path, staged: bool = False) -> str:
-    import subprocess
-
+async def _get_git_diff(cwd: Path, staged: bool = False) -> str:
     try:
         args = ["git", "diff"]
         if staged:
             args.append("--staged")
         args.append("--stat")
-        result = subprocess.run(
+        result = await run_subprocess(
             args,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=15,
             cwd=str(cwd),
         )
@@ -30,19 +24,13 @@ def _get_git_diff(cwd: Path, staged: bool = False) -> str:
         return ""
 
 
-def _get_full_diff(cwd: Path, staged: bool = False, max_lines: int = 500) -> str:
-    import subprocess
-
+async def _get_full_diff(cwd: Path, staged: bool = False, max_lines: int = 500) -> str:
     try:
         args = ["git", "diff", "--no-color"]
         if staged:
             args.append("--staged")
-        result = subprocess.run(
+        result = await run_subprocess(
             args,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=30,
             cwd=str(cwd),
         )
@@ -78,14 +66,14 @@ def register(agent):
         log_tool(ctx, "review_changes", "cached" if staged else "working")
 
         workspace_dir = ctx.deps.workspace_dir
-        diff = _get_full_diff(workspace_dir, staged, max_lines=600)
+        diff = await _get_full_diff(workspace_dir, staged, max_lines=600)
 
         if not diff.strip():
             return "未检测到代码变更。" + (
                 "请先用 git add 暂存变更。" if staged else ""
             )
 
-        stat = _get_git_diff(workspace_dir, staged)
+        stat = await _get_git_diff(workspace_dir, staged)
         lines = [
             "## 变更摘要",
             f"```\n{stat}\n```" if stat else "",

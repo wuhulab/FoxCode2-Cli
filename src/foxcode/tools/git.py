@@ -1,18 +1,13 @@
-import subprocess
 from pathlib import Path
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
-from . import log_tool, permission_validator
+from . import log_tool, permission_validator, run_subprocess
 
 
-def _run_git(cwd: Path, *args: str, timeout: int = 30) -> str:
+async def _run_git(cwd: Path, *args: str, timeout: int = 30) -> str:
     try:
-        result = subprocess.run(
+        result = await run_subprocess(
             ["git", *args],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=timeout,
             cwd=str(cwd),
         )
@@ -26,7 +21,7 @@ def _run_git(cwd: Path, *args: str, timeout: int = 30) -> str:
         if result.returncode != 0 and not output:
             return f"git 退出码: {result.returncode}"
         return output if output else "(命令执行成功，无输出)"
-    except subprocess.TimeoutExpired:
+    except TimeoutError:
         return f"错误: git 命令执行超时 ({timeout}秒)"
     except FileNotFoundError:
         return "错误: 未找到 git，请确保已安装 Git"
@@ -38,7 +33,7 @@ def register(agent):
     @agent.tool(args_validator=permission_validator("git_status"))
     async def git_status(ctx: RunContext[WorkspaceDeps]) -> str:
         log_tool(ctx, "git_status")
-        return _run_git(ctx.deps.workspace_dir, "status", "--short", "--branch")
+        return await _run_git(ctx.deps.workspace_dir, "status", "--short", "--branch")
 
     @agent.tool(args_validator=permission_validator("git_diff"))
     async def git_diff(
@@ -51,7 +46,7 @@ def register(agent):
             args.append("--staged")
         if filename:
             args.append(filename)
-        return _run_git(ctx.deps.workspace_dir, *args)
+        return await _run_git(ctx.deps.workspace_dir, *args)
 
     @agent.tool(args_validator=permission_validator("git_log"))
     async def git_log(
@@ -62,7 +57,7 @@ def register(agent):
         args = ["log", f"--max-count={n}", "--oneline", "--decorate"]
         if filename:
             args.append(filename)
-        return _run_git(ctx.deps.workspace_dir, *args)
+        return await _run_git(ctx.deps.workspace_dir, *args)
 
     @agent.tool(args_validator=permission_validator("git_add"))
     async def git_add(ctx: RunContext[WorkspaceDeps], filename: str = "") -> str:
@@ -73,7 +68,7 @@ def register(agent):
             args.append(filename)
         else:
             args.append(".")
-        return _run_git(ctx.deps.workspace_dir, *args)
+        return await _run_git(ctx.deps.workspace_dir, *args)
 
     @agent.tool(args_validator=permission_validator("git_commit"))
     async def git_commit(ctx: RunContext[WorkspaceDeps], message: str = "") -> str:
@@ -83,12 +78,12 @@ def register(agent):
         if not message:
             return "错误: 提交信息不能为空"
         args = ["commit", "-m", message]
-        return _run_git(ctx.deps.workspace_dir, *args)
+        return await _run_git(ctx.deps.workspace_dir, *args)
 
     @agent.tool(args_validator=permission_validator("git_branch"))
     async def git_branch(ctx: RunContext[WorkspaceDeps]) -> str:
         log_tool(ctx, "git_branch")
-        return _run_git(ctx.deps.workspace_dir, "branch", "-a")
+        return await _run_git(ctx.deps.workspace_dir, "branch", "-a")
 
     @agent.tool(args_validator=permission_validator("git_checkout"))
     async def git_checkout(
@@ -101,4 +96,4 @@ def register(agent):
         if create:
             args.append("-b")
         args.append(branch)
-        return _run_git(ctx.deps.workspace_dir, *args)
+        return await _run_git(ctx.deps.workspace_dir, *args)

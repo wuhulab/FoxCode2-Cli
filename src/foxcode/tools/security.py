@@ -102,13 +102,29 @@ SECURITY_PATTERNS: list[dict] = [
 SHELL_PATTERNS = [p for p in SECURITY_PATTERNS if p["context"] == "shell"]
 CODE_PATTERNS = [p for p in SECURITY_PATTERNS if p["context"] == "code"]
 
+# 预编译所有正则，避免每次安全检查时重新编译
+_COMPILED_SHELL = [
+    {
+        **p,
+        "compiled": [re.compile(pat, re.IGNORECASE) for pat in p["patterns"]],
+    }
+    for p in SHELL_PATTERNS
+]
+_COMPILED_CODE = [
+    {
+        **p,
+        "compiled": [re.compile(pat, re.IGNORECASE) for pat in p["patterns"]],
+    }
+    for p in CODE_PATTERNS
+]
+
 
 def check_content_security(content: str) -> list[dict]:
     findings = []
-    for pattern in CODE_PATTERNS:
-        for regex in pattern["patterns"]:
-            matches = re.finditer(regex, content, re.IGNORECASE)
-            for m in matches:
+    for pattern in _COMPILED_CODE:
+        for regex in pattern["compiled"]:
+            m = regex.search(content)
+            if m:
                 line_no = content[: m.start()].count("\n") + 1
                 findings.append(
                     {
@@ -126,16 +142,17 @@ def check_content_security(content: str) -> list[dict]:
 
 def check_shell_security(command: str) -> list[dict]:
     findings = []
-    for pattern in SHELL_PATTERNS:
-        for regex in pattern["patterns"]:
-            if re.search(regex, command, re.IGNORECASE):
+    for pattern in _COMPILED_SHELL:
+        for regex in pattern["compiled"]:
+            m = regex.search(command)
+            if m:
                 findings.append(
                     {
                         "id": pattern["id"],
                         "name": pattern["name"],
                         "description": pattern["description"],
                         "severity": pattern["severity"],
-                        "match": re.search(regex, command, re.IGNORECASE).group()[:60],
+                        "match": m.group()[:60],
                         "line": 0,
                     }
                 )

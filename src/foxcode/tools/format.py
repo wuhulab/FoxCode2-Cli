@@ -1,7 +1,6 @@
-import subprocess
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
-from . import log_tool, permission_validator
+from . import log_tool, permission_validator, run_subprocess
 
 
 FORMATTERS = {
@@ -47,12 +46,8 @@ def register(agent):
             for cmd_base in formatters:
                 cmd = [*cmd_base, str(filepath)]
                 try:
-                    result = subprocess.run(
+                    result = await run_subprocess(
                         cmd,
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
                         timeout=ctx.deps.shell_timeout,
                         cwd=str(workspace_dir),
                     )
@@ -81,12 +76,8 @@ def register(agent):
             for cmd_base in (["python", "-m", "black"], ["npx", "prettier", "--write"]):
                 cmd = [*cmd_base, str(dirpath)]
                 try:
-                    result = subprocess.run(
+                    result = await run_subprocess(
                         cmd,
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
                         timeout=ctx.deps.shell_timeout * 2,
                         cwd=str(workspace_dir),
                     )

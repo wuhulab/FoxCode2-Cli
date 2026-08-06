@@ -418,6 +418,7 @@ def test_inherit_permissions_solo_mode():
 
 def test_track_goal_files_git_commit():
     """_track_goal_files 应在 git 仓库中提交 goal 持久化文件。"""
+    import asyncio
     import subprocess
     import tempfile
 
@@ -430,7 +431,7 @@ def test_track_goal_files_git_commit():
         subprocess.run(["git", "config", "user.name", "t"], cwd=str(d), check=True)
         (d / "goal.md").write_text("# 目标\n", encoding="utf-8")
 
-        result = _track_goal_files(d, 1)
+        result = asyncio.run(_track_goal_files(d, 1))
         assert "goal" in result.lower() or "提交" in result
 
         # 提交后 git log 应有一条记录
@@ -445,7 +446,7 @@ def test_track_goal_files_git_commit():
         assert "goal" in log.lower()
 
         # 无变更时再次调用应返回空串（不产生空提交）
-        assert _track_goal_files(d, 2) == ""
+        assert asyncio.run(_track_goal_files(d, 2)) == ""
 
 
 def test_parse_foxcode_md_commands():

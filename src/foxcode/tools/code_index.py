@@ -6,8 +6,10 @@
 """
 
 import ast
+import asyncio
 import json
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -16,6 +18,25 @@ from pydantic_ai import RunContext
 
 from ..models import WorkspaceDeps
 from . import log_tool, permission_validator
+
+SOURCE_EXTS = frozenset(
+    {
+        ".py",
+        ".js",
+        ".ts",
+        ".jsx",
+        ".tsx",
+        ".go",
+        ".rs",
+        ".java",
+        ".c",
+        ".cpp",
+        ".h",
+        ".hpp",
+        ".rb",
+        ".php",
+    }
+)
 
 
 @dataclass
@@ -35,59 +56,55 @@ class CodeIndex:
     workspace_dir: Path
     symbols: list[Symbol] = field(default_factory=list)
     _file_mtime: dict[str, float] = field(default_factory=dict)
+    _last_check: float = 0.0
 
     def is_stale(self) -> bool:
-        """检查索引是否需要更新（基于文件修改时间）。"""
+        """检查索引是否需要更新（基于文件修改时间），带节流防止高频重复扫描。"""
+        now = time.monotonic()
+        if now - self._last_check < 2.0:
+            return False
+        self._last_check = now
+        known = set(self._file_mtime)
+        seen = set()
         for f in self._iter_source_files():
+            seen.add(str(f))
             mtime = f.stat().st_mtime
-            key = str(f)
-            if key not in self._file_mtime or self._file_mtime[key] != mtime:
+            if str(f) not in self._file_mtime or self._file_mtime[str(f)] != mtime:
                 return True
-        return len(self._file_mtime) != len(list(self._iter_source_files()))
+        return known != seen
 
     def _iter_source_files(self):
-        """遍历源代码文件。"""
-        for ext in (
-            ".py",
-            ".js",
-            ".ts",
-            ".jsx",
-            ".tsx",
-            ".go",
-            ".rs",
-            ".java",
-            ".c",
-            ".cpp",
-            ".h",
-            ".hpp",
-            ".rb",
-            ".php",
-        ):
-            for f in self.workspace_dir.rglob(f"*{ext}"):
-                rel = f.relative_to(self.workspace_dir)
-                if any(p.startswith(".") for p in rel.parts if p != "."):
-                    continue
-                if f.name.startswith("."):
-                    continue
-                yield f
+        """遍历源代码文件（单次目录遍历 + 后缀过滤）。"""
+        for f in self.workspace_dir.rglob("*"):
+            if not f.is_file():
+                continue
+            if f.suffix not in SOURCE_EXTS:
+                continue
+            rel = f.relative_to(self.workspace_dir)
+            if any(p.startswith(".") for p in rel.parts if p != "."):
+                continue
+            if f.name.startswith("."):
+                continue
+            yield f
 
-    def build(self) -> str:
+    async def build(self) -> str:
         """构建索引，返回状态信息。"""
         self.symbols.clear()
         self._file_mtime.clear()
 
         # 尝试 ctags
-        ctags_result = self._try_ctags()
+        ctags_result = await self._try_ctags()
         if ctags_result:
             return ctags_result
 
         # 回退到 AST
-        return self._build_ast_index()
+        return await asyncio.to_thread(self._build_ast_index)
 
-    def _try_ctags(self) -> Optional[str]:
+    async def _try_ctags(self) -> Optional[str]:
         """尝试使用 universal-ctags 生成索引。"""
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["ctags", "--version"],
                 capture_output=True,
                 text=True,
@@ -114,7 +131,8 @@ class CodeIndex:
                 "-",
                 str(self.workspace_dir),
             ]
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 cmd,
                 capture_output=True,
                 text=True,
@@ -331,7 +349,7 @@ def register(agent):
         """构建或更新代码库索引。首次使用或代码库变更后调用。"""
         log_tool(ctx, "index_codebase")
         index = _get_index(ctx.deps.workspace_dir)
-        result = index.build()
+        result = await index.build()
         ctx.deps.tool_tracker.add_chars(len(result))
         return result
 
@@ -352,7 +370,7 @@ def register(agent):
         log_tool(ctx, "search_symbols", query, kind or "all")
         index = _get_index(ctx.deps.workspace_dir)
         if not index.symbols or index.is_stale():
-            index.build()
+            await index.build()
 
         results = index.search(query, kind, limit)
         if not results:
@@ -385,7 +403,7 @@ def register(agent):
         log_tool(ctx, "get_symbol_context", name)
         index = _get_index(ctx.deps.workspace_dir)
         if not index.symbols or index.is_stale():
-            index.build()
+            await index.build()
 
         result = index.get_context(name, max_lines)
         if result is None:

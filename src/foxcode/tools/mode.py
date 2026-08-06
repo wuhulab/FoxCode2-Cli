@@ -12,8 +12,9 @@ def register(agent):
         if getattr(ctx.deps, "permissions", None) is not None:
             ctx.deps.permissions.plan_mode = True
         return (
-            "已进入计划模式: 现在只能读取/搜索/探索，不能修改文件或执行命令。"
-            "请先充分调查，然后用 ActionPlan 给出清晰的分步实施计划。"
+            "Entered plan mode: you can only read/search/explore now, not modify files or run commands. "
+            "Investigate thoroughly, then give a clear step-by-step implementation plan in the ActionPlan. "
+            "Do not overthink; gather what you need and present the plan."
         )
 
     @agent.tool(args_validator=permission_validator("exit_plan_mode"))
@@ -22,4 +23,4 @@ def register(agent):
         ctx.deps.plan_mode = False
         if getattr(ctx.deps, "permissions", None) is not None:
             ctx.deps.permissions.plan_mode = False
-        return "已退出计划模式: 可以正常修改文件、执行命令了。"
+        return "Exited plan mode: you can modify files and run commands again."
