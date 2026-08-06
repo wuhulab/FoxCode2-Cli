@@ -3,6 +3,10 @@ __pycache__/
 *.egg-info/
 .foxcode/
 vscode-extension/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
 
 #foxcode goal文件
 goal.md

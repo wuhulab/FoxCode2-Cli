@@ -2,7 +2,26 @@
 name = "foxcode"
 version = "0.5.0"
 description = "AI 编码代理工具 - 智能编程助手"
+readme = "README.md"
 requires-python = ">=3.11"
+license = "AGPL-3.0-or-later"
+authors = [
+    { name = "shunian", email = "shunianssy@163.com" },
+]
+keywords = ["ai", "coding", "agent", "cli", "pydantic-ai", "编程助手"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
     "pydantic-ai>=2.18.0",
     "httpx>=0.28.0",
@@ -13,9 +32,18 @@ dependencies = [
     "jedi>=0.19.0",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23.0",
+]
+
 [build-system]
-requires = ["setuptools>=75.0"]
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+license-files = ["license.txt"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -26,3 +54,6 @@ foxcode = ["*.md", "builtin_skills/**/*"]
 [project.scripts]
 foxcode = "foxcode.cli:main"
 fc = "foxcode.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
