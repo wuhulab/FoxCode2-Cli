@@ -21,7 +21,13 @@ from rich.text import Text
 from rich import box
 from rich.spinner import SPINNERS
 
-from .config import load_config, load_project_config, apply_project_settings
+from .config import (
+    load_config,
+    load_project_config,
+    apply_project_settings,
+    BUILTIN_FREE_BASE_URL,
+    BUILTIN_FREE_API_KEY,
+)
 from .models import ActionPlan, WorkspaceDeps, UndoManager
 from .agent import create_agent
 from .session import SessionManager
@@ -56,6 +62,7 @@ class FoxCodeCompleter(Completer):
         ("/plan", "切换计划模式"),
         ("/solo", "切换无人值守模式"),
         ("/permissions", "查看权限设置"),
+        ("/free", "切换到内置免费 API 并选择模型"),
         ("/model", "配置模型参数"),
         ("/mcp", "列出 MCP 服务器"),
         ("/skills", "列出可用 Skills"),
@@ -189,6 +196,11 @@ def parse_args(argv=None):
     parser.add_argument("--cwd", default=None, help="工作目录")
     parser.add_argument("--model", default=None, help="覆盖默认模型")
     parser.add_argument(
+        "--free",
+        action="store_true",
+        help="使用内置免费 API 并选择模型",
+    )
+    parser.add_argument(
         "-solo",
         "--solo",
         action="store_true",
@@ -255,6 +267,7 @@ def print_help():
     table.add_row("/plan", "切换计划模式（只读探索，先出方案）")
     table.add_row("/solo", "切换无人值守模式（自动放行，只拦截高危命令）")
     table.add_row("/permissions", "查看当前权限模式与规则")
+    table.add_row("/free", "切换到内置免费 API 并选择模型")
     table.add_row("/model", "配置模型参数（兼容 OpenAI URL 格式）")
     table.add_row("/mcp", "列出已配置的 MCP 服务器")
     table.add_row("/skills", "列出可用 Skills")
@@ -640,6 +653,50 @@ def _agent_lists(skills_mgr, subagents_mgr):
     return skills_list, subagent_list
 
 
+async def _fetch_model_list(base_url: str, api_key: str) -> list[str]:
+    """通过 /v1/models 获取可用模型名称列表。"""
+    url = base_url.rstrip("/") + "/models"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+        return [m.get("id") for m in data.get("data", []) if m.get("id")]
+    except Exception as e:
+        console.print(f"  [yellow]获取模型列表失败: {e}[/yellow]")
+        return []
+
+
+async def _select_model_interactive(
+    base_url: str, api_key: str, current: str = ""
+) -> str:
+    """获取模型列表展示给用户，让用户输入名称或序号选择模型。"""
+    models = await _fetch_model_list(base_url, api_key)
+    if not models:
+        return current
+    default = current or models[0]
+    console.print("[bold cyan]可用模型:[/bold cyan]")
+    for i, name in enumerate(models, 1):
+        console.print(f"  [yellow]{i}[/yellow]. {name}")
+    console.print()
+    choice = console.input(
+        f"[bold cyan]输入模型名称或序号 [/bold cyan][dim](回车默认 {default})[/dim]: "
+    ).strip()
+    if not choice:
+        return default
+    if choice.isdigit():
+        idx = int(choice)
+        if 1 <= idx <= len(models):
+            return models[idx - 1]
+        console.print("[red]序号无效，使用默认模型[/red]")
+        return default
+    if choice in models:
+        return choice
+    console.print("[red]模型名称不在列表中，仍将使用输入的名称[/red]")
+    return choice
+
+
 async def _run_with_narration(
     agent,
     prompt: str | Sequence[Any] | None,
@@ -1020,8 +1077,8 @@ async def _run_headless(
                 )
         except Exception as e:
             if mcp_toolsets:
-                console.print(f"[yellow]⚠ MCP 初始化失败: {e}[/yellow]", stderr=True)
-                console.print("[dim]  已自动禁用 MCP，继续运行...[/dim]", stderr=True)
+                console.print(f"[yellow]⚠ MCP 初始化失败: {e}[/yellow]")
+                console.print("[dim]  已自动禁用 MCP，继续运行...[/dim]")
                 agent = create_agent(
                     config,
                     http_client,
@@ -1176,7 +1233,8 @@ async def _run_interactive(config: dict, args):
                 terminal_mode, \
                 terminal_cwd, \
                 pending_skill, \
-                default_prompt
+                default_prompt, \
+                agent
             while True:
                 try:
                     if startup_commands:
@@ -1284,6 +1342,57 @@ async def _run_interactive(config: dict, args):
                         continue
                     elif cmd == "/permissions":
                         console.print(f"[cyan]{perms.summary()}[/cyan]")
+                        continue
+                    elif cmd == "/free":
+                        config["base_url"] = BUILTIN_FREE_BASE_URL
+                        config["api_key"] = BUILTIN_FREE_API_KEY
+                        selected = await _select_model_interactive(
+                            config["base_url"],
+                            config["api_key"],
+                            config.get("model") or "",
+                        )
+                        if selected:
+                            config["model"] = selected
+                        settings_path = workspace_dir / ".foxcode" / "settings.json"
+                        try:
+                            if settings_path.exists():
+                                settings = json.loads(
+                                    settings_path.read_text(encoding="utf-8")
+                                )
+                            else:
+                                settings = {}
+                        except Exception:
+                            settings = {}
+                        settings["base_url"] = config["base_url"]
+                        settings["api_key"] = config["api_key"]
+                        settings["model"] = config["model"]
+                        try:
+                            settings_path.parent.mkdir(parents=True, exist_ok=True)
+                            settings_path.write_text(
+                                json.dumps(settings, ensure_ascii=False, indent=2),
+                                encoding="utf-8",
+                            )
+                        except Exception as e:
+                            console.print(f"  [yellow]保存配置失败: {e}[/yellow]")
+                        new_agent = create_agent(
+                            config,
+                            http_client,
+                            project_config["instructions"],
+                            mcp_toolsets=mcp_toolsets,
+                            skills_list=skills_list,
+                            subagent_list=subagent_list,
+                        )
+                        if mcp_toolsets:
+                            try:
+                                await new_agent.__aenter__()
+                            except Exception as e:
+                                console.print(
+                                    f"  [yellow]新 Agent MCP 初始化失败: {e}[/yellow]"
+                                )
+                        agent = new_agent
+                        console.print(
+                            f"[green]已切换到内置免费 API，当前模型: {config['model']}[/green]"
+                        )
                         continue
                     elif cmd == "/model":
                         console.print(
@@ -1751,6 +1860,29 @@ async def main_async():
     config = load_config()
     if args.cwd:
         config["workspace_dir"] = Path(args.cwd).resolve()
+
+    if args.free:
+        config["base_url"] = BUILTIN_FREE_BASE_URL
+        config["api_key"] = BUILTIN_FREE_API_KEY
+
+    using_free = config.get("base_url") == BUILTIN_FREE_BASE_URL
+    interactive = not (args.prompt or not sys.stdin.isatty())
+
+    if args.model:
+        config["model"] = args.model
+    elif interactive and (args.free or (using_free and not config.get("model"))):
+        selected = await _select_model_interactive(
+            config["base_url"], config["api_key"], config.get("model") or ""
+        )
+        if selected:
+            config["model"] = selected
+
+    if not config.get("model"):
+        if using_free:
+            models = await _fetch_model_list(config["base_url"], config["api_key"])
+            config["model"] = models[0] if models else "gpt-4o"
+        else:
+            config["model"] = "gpt-4o"
 
     if not config["api_key"]:
         console.print("[red]错误: 未设置 OPENAI_API_KEY[/red]")

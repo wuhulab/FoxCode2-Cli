@@ -5,6 +5,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# 内置免费 API（开箱即用，无需配置密钥）
+BUILTIN_FREE_BASE_URL = "https://fai.shunx.top/v1"
+BUILTIN_FREE_API_KEY = "sk-C4Dy0S5OFKJ7QoPu8erQc2tTDklW2fBIry34CA8tmFcC1tGr"
+
 
 def load_project_config(workspace_dir: Path) -> dict:
     foxcode_dir = workspace_dir / ".foxcode"
@@ -97,9 +101,9 @@ def load_config():
     stream_output = os.getenv("STREAM_OUTPUT", "false").lower() in ("true", "1", "yes")
 
     return {
-        "model": os.getenv("OPENAI_MODEL", "gpt-4o"),
-        "base_url": os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-        "api_key": os.getenv("OPENAI_API_KEY", ""),
+        "model": os.getenv("OPENAI_MODEL", ""),
+        "base_url": os.getenv("OPENAI_BASE_URL", BUILTIN_FREE_BASE_URL),
+        "api_key": os.getenv("OPENAI_API_KEY", BUILTIN_FREE_API_KEY),
         "workspace_dir": Path(os.getenv("WORKSPACE_DIR", ".")).resolve(),
         "temperature": temperature,
         "shell_timeout": shell_timeout,
