@@ -265,13 +265,9 @@ def register(agent):
             return f"错误: {path} 不是一个目录"
         lines = []
         try:
-            for entry in sorted(search_path.rglob("*")):
-                if any(
-                    p.startswith(".")
-                    for p in entry.relative_to(search_path).parts[:-1]
-                    if p != "."
-                ):
-                    continue
+            from . import iter_project_entries
+
+            for entry in iter_project_entries(search_path):
                 rel_path = entry.relative_to(ctx.deps.workspace_dir)
                 if entry.is_dir():
                     lines.append(f"{rel_path}/")

@@ -44,13 +44,11 @@ CHECKS = {
 
 def _detect_langs(workspace_dir: Path) -> list[str]:
     """检测项目中使用的主要编程语言。"""
+    from . import iter_project_files
+
     counts: dict[str, int] = {}
-    for f in workspace_dir.rglob("*"):
-        if f.is_file() and not any(
-            p.startswith(".")
-            for p in f.relative_to(workspace_dir).parts[:-1]
-            if p != "."
-        ):
+    for f in iter_project_files(workspace_dir):
+        if f.is_file():
             ext = f.suffix.lower()
             if ext in CHECKS:
                 counts[ext] = counts.get(ext, 0) + 1
@@ -66,11 +64,13 @@ def _has_file(workspace_dir: Path, filenames: list[str]) -> tuple[bool, str]:
 
 
 def _has_pattern(workspace_dir: Path, patterns: list[str]) -> tuple[bool, str]:
+    from . import iter_project_files
+
     for pattern in patterns:
         if pattern.startswith("*"):
-            matches = list(workspace_dir.rglob(pattern))
-            if matches:
-                return True, str(matches[0].relative_to(workspace_dir))
+            for f in iter_project_files(workspace_dir):
+                if f.name == pattern[1:] and f.is_file():
+                    return True, str(f.relative_to(workspace_dir))
         else:
             path = workspace_dir / pattern
             if path.exists():
@@ -96,6 +96,8 @@ async def _check_git(workspace_dir: Path) -> str:
 
 
 def _check_tests(workspace_dir: Path, langs: list[str]) -> str:
+    from . import iter_project_files
+
     has_test_files = False
     for ext in langs:
         if ext in CHECKS:
@@ -104,8 +106,8 @@ def _check_tests(workspace_dir: Path, langs: list[str]) -> str:
                 has_test_files = True
                 break
             # 手动查找测试文件
-            for f in workspace_dir.rglob("*test*"):
-                if f.is_file():
+            for f in iter_project_files(workspace_dir):
+                if "test" in f.name.lower() and f.is_file():
                     has_test_files = True
                     break
     return "✅ 检测到测试相关配置/文件" if has_test_files else "⚠️ 未检测到测试配置"

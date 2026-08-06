@@ -491,34 +491,20 @@ def show_history(deps: WorkspaceDeps):
 
 
 async def _exec_shell(command: str, cwd: Path, timeout: int = 120) -> str:
-    try:
-        result = await run_subprocess(
-            command,
-            shell=True,
-            timeout=timeout,
-            cwd=str(cwd),
-        )
-        output = ""
-        if result.stdout:
-            output += result.stdout.rstrip()
-        if result.stderr:
-            if output:
-                output += "\n"
-            output += f"[stderr]\n{result.stderr.rstrip()}"
-        if result.returncode != 0:
-            output += f"\n退出码: {result.returncode}"
-        return output if output else "(命令执行成功，无输出)"
-    except TimeoutError:
-        return f"错误: 命令执行超时 ({timeout}秒)"
-    except Exception as e:
-        return f"错误: 命令执行失败 - {e}"
+    return await _exec_shell_args(command, cwd, timeout, shell=True)
 
 
-async def _exec_shell_args(args: list[str], cwd: Path, timeout: int = 120) -> str:
-    """参数列表形式执行命令（不经 shell），避免参数内容被解释为 shell 命令。"""
+async def _exec_shell_args(
+    args: list[str] | str, cwd: Path, timeout: int = 120, shell: bool = False
+) -> str:
+    """执行命令并返回结果文本。
+
+    参数列表形式（shell=False）不经 shell，避免参数内容被解释为 shell 命令。
+    """
     try:
         result = await run_subprocess(
             args,
+            shell=shell,
             timeout=timeout,
             cwd=str(cwd),
         )

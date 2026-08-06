@@ -92,11 +92,10 @@ def _python_grep(
     results = []
     count = 0
     try:
-        for filepath in search_dir.rglob("*"):
+        from . import iter_project_files
+
+        for filepath in iter_project_files(search_dir):
             if not filepath.is_file():
-                continue
-            rel_dir = filepath.parent.relative_to(search_dir)
-            if any(p.startswith(".") for p in rel_dir.parts if p != "."):
                 continue
             if filepath.name.startswith("."):
                 continue

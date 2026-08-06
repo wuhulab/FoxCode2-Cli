@@ -312,16 +312,19 @@ class ToolTracker:
     session_requests: int = 0
     paused: bool = False
     status: Any = None
+    _summary_cache: str | None = None
 
     def reset(self):
         self._counts.clear()
         self._current_tool = ""
         self._total_chars = 0
+        self._summary_cache = None
 
     def count(self, tool_name: str, chars: int = 0):
         self._counts[tool_name] += 1
         self._current_tool = tool_name
         self._total_chars += chars
+        self._summary_cache = None
 
     def add_chars(self, n: int):
         self._total_chars += n
@@ -350,13 +353,17 @@ class ToolTracker:
         return dict(self._counts)
 
     def summary_str(self, lang: str = "zh") -> str:
+        if self._summary_cache is not None:
+            return self._summary_cache
         if not self._counts:
+            self._summary_cache = ""
             return ""
         parts = []
         for name, count in sorted(self._counts.items()):
             label = COUNT_LABELS.get(name, (name, name))[0 if lang == "zh" else 1]
             parts.append(f"{count}次{label}")
-        return "，".join(parts) if parts else ""
+        self._summary_cache = "，".join(parts) if parts else ""
+        return self._summary_cache
 
     def status_line(self, spinner: str, lang: str = "zh") -> str:
         status = STATUS_NAMES.get(self._current_tool, "")

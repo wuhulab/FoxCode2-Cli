@@ -74,14 +74,13 @@ class CodeIndex:
         return known != seen
 
     def _iter_source_files(self):
-        """遍历源代码文件（单次目录遍历 + 后缀过滤）。"""
-        for f in self.workspace_dir.rglob("*"):
+        """遍历源代码文件（剪枝跳过重型/隐藏目录 + 后缀过滤）。"""
+        from . import iter_project_files
+
+        for f in iter_project_files(self.workspace_dir):
             if not f.is_file():
                 continue
             if f.suffix not in SOURCE_EXTS:
-                continue
-            rel = f.relative_to(self.workspace_dir)
-            if any(p.startswith(".") for p in rel.parts if p != "."):
                 continue
             if f.name.startswith("."):
                 continue

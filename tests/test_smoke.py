@@ -580,6 +580,49 @@ def test_read_file_range_reads_to_end_by_default():
         assert output == "line1\nline2\nline3\nline4\n"
 
 
+def test_iter_project_files_prunes_heavy_dirs():
+    """项目遍历应剪枝跳过 node_modules/.git/venv 等重型目录。"""
+    import tempfile
+
+    from foxcode.tools import iter_project_entries, iter_project_files
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "main.py").write_text("x", encoding="utf-8")
+        (root / "app").mkdir()
+        (root / "app" / "util.py").write_text("x", encoding="utf-8")
+        for d in ("node_modules", ".git", "__pycache__", "venv", ".venv", "dist"):
+            p = root / d
+            p.mkdir(parents=True, exist_ok=True)
+            (p / "junk.py").write_text("x", encoding="utf-8")
+
+        files = {f.relative_to(root).as_posix() for f in iter_project_files(root)}
+        assert files == {"main.py", "app/util.py"}, f"实际文件: {files}"
+
+        entries = {e.relative_to(root).as_posix() for e in iter_project_entries(root)}
+        assert "app" in entries
+        for skipped in ("node_modules", ".git", "__pycache__", "venv", ".venv", "dist"):
+            assert skipped not in entries, f"{skipped} 不应被遍历到"
+
+
+def test_tool_tracker_summary_cache_invalidates():
+    """ToolTracker 计数变化后 summary_str 应重新计算（缓存失效）。"""
+    from foxcode.models import ToolTracker
+
+    tracker = ToolTracker()
+    assert tracker.summary_str() == ""
+    tracker.count("read_file")
+    s1 = tracker.summary_str()
+    assert "读取" in s1
+    # 计数变化后应反映新状态
+    tracker.count("write_file")
+    s2 = tracker.summary_str()
+    assert "编辑" in s2 and s2 != s1
+    # reset 后应清空
+    tracker.reset()
+    assert tracker.summary_str() == ""
+
+
 def test_fuzzy_find_replacement_preserves_content():
     """模糊匹配应返回正确的替换区间，替换后不损坏文件其余内容。"""
     from foxcode.tools.multi_edit import _fuzzy_find

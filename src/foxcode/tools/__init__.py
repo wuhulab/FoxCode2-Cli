@@ -1,7 +1,60 @@
 import asyncio
+import os
 import subprocess
+from pathlib import Path
 
 from ..permissions import check_permission
+
+
+# 递归遍历时应剪枝跳过的重型目录（node_modules/venv 等不是隐藏目录，需显式列出）
+_SKIP_DIRS = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        "__pycache__",
+        "node_modules",
+        ".venv",
+        "venv",
+        "dist",
+        "build",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".egg-info",
+        ".tox",
+        ".idea",
+        ".vscode",
+        "site-packages",
+        "target",
+    }
+)
+
+
+def iter_project_entries(workspace_dir: Path):
+    """递归遍历项目文件/目录，剪枝跳过重型/隐藏目录。
+
+    与 rglob 不同，os.walk 可原地修改 dirnames 实现剪枝，
+    避免进入 .git、node_modules 等目录造成无谓的磁盘扫描。
+    隐藏目录（以 . 开头）整体跳过；返回文件与目录的 Path。
+    """
+    for dirpath, dirnames, filenames in os.walk(workspace_dir):
+        dirnames[:] = [
+            d for d in dirnames if d not in _SKIP_DIRS and not d.startswith(".")
+        ]
+        base = Path(dirpath)
+        for d in dirnames:
+            yield base / d
+        for name in filenames:
+            yield base / name
+
+
+def iter_project_files(workspace_dir: Path):
+    """只遍历项目中的文件（剪枝跳过重型/隐藏目录）。"""
+    for entry in iter_project_entries(workspace_dir):
+        if entry.is_dir():
+            continue
+        yield entry
 
 
 def log_tool(ctx, tool_name: str, *details: str):
