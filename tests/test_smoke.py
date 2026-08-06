@@ -448,6 +448,37 @@ def test_track_goal_files_git_commit():
         assert _track_goal_files(d, 2) == ""
 
 
+def test_parse_foxcode_md_commands():
+    """[Command] 文件应解析为启动命令队列，而非默认提示。"""
+    import tempfile
+
+    from foxcode.cli import _parse_foxcode_md
+
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        (d / ".foxcode").mkdir(parents=True)
+        (d / ".foxcode" / "foxcode.md").write_text(
+            "[Command]\n/solo\n/goal\n", encoding="utf-8"
+        )
+        default_prompt, commands = _parse_foxcode_md(d)
+        assert default_prompt is None
+        assert commands == ["/solo", "/goal"]
+
+        # 非 Command 文件作为默认提示
+        (d / ".foxcode" / "foxcode.md").write_text(
+            "请帮我整理这个项目\n", encoding="utf-8"
+        )
+        default_prompt, commands = _parse_foxcode_md(d)
+        assert default_prompt == "请帮我整理这个项目"
+        assert commands == []
+
+        # 文件不存在
+        (d / ".foxcode" / "foxcode.md").unlink()
+        default_prompt, commands = _parse_foxcode_md(d)
+        assert default_prompt is None
+        assert commands == []
+
+
 def test_code_index_ast_no_duplicate_methods():
     """AST 索引不应将类方法重复添加为顶层函数。"""
     import tempfile

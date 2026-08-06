@@ -106,5 +106,4 @@ def load_mcp_toolsets(workspace_dir: Path, permissions) -> list[MCPToolset]:
             console.print(f"  [yellow]MCP 服务器 {name} 初始化失败: {e}[/yellow]")
             continue
         toolsets.append(toolset)
-        console.print(f"[dim]MCP 服务器已加载: {name}[/dim]")
     return toolsets

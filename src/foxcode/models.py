@@ -359,7 +359,7 @@ class ToolTracker:
         return "，".join(parts) if parts else ""
 
     def status_line(self, spinner: str, lang: str = "zh") -> str:
-        status = STATUS_NAMES.get(self._current_tool, "思考中")
+        status = STATUS_NAMES.get(self._current_tool, "")
         summary = self.summary_str(lang)
         if summary:
             parts = [f"{spinner} {status} ({summary})"]

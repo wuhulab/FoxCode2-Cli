@@ -342,7 +342,7 @@ def _parse_image_refs(prompt: str, workspace_dir: Path) -> str | list:
             data_url = f"data:{media_type};base64,{b64}"
 
             # 添加图片前的文本
-            text_part = prompt[last_end:m.start()]
+            text_part = prompt[last_end : m.start()]
             if text_part:
                 parts.append(text_part)
             parts.append(ImageUrl(url=data_url, media_type=media_type))
@@ -805,6 +805,32 @@ def _track_goal_files(workspace_dir: Path, iteration: int) -> str:
     return result
 
 
+def _parse_foxcode_md(workspace_dir: Path) -> tuple[str | None, list[str]]:
+    """解析 .foxcode/foxcode.md。
+
+    - 以 [Command] 开头：返回 (None, [命令列表])，每行 `/xxx` 作为启动命令
+    - 其他内容：返回 (内容, [])，整个文件作为默认提示
+    文件不存在或为空返回 (None, [])。
+    """
+    foxcode_md = workspace_dir / ".foxcode" / "foxcode.md"
+    if not foxcode_md.exists():
+        return None, []
+    try:
+        raw = foxcode_md.read_text(encoding="utf-8").strip()
+    except Exception:
+        return None, []
+    if not raw:
+        return None, []
+    if raw.startswith("[Command]"):
+        commands = [
+            line.strip()
+            for line in raw.splitlines()[1:]
+            if line.strip() and line.strip().startswith("/")
+        ]
+        return None, commands
+    return raw, []
+
+
 async def _run_goal_loop(
     agent,
     goal: str,
@@ -1063,6 +1089,7 @@ async def _run_interactive(config: dict, args):
     if args.solo:
         perms.solo_mode = True
 
+    console.print("FoxCode")
     console.print(f"[dim]工作目录: {workspace_dir}[/dim]")
     console.print(f"[dim]模型: {config['model']}[/dim]")
     if project_config["instructions"]:
@@ -1073,8 +1100,8 @@ async def _run_interactive(config: dict, args):
         console.print(f"[dim]MCP 服务器: {len(mcp_toolsets)} 个已配置[/dim]")
     console.print()
 
-    # 展示未提交的 git 变更
-    _show_git_status_hint(workspace_dir)
+    # 展示未提交的 git 变更 (弃用，请勿删除)
+    # _show_git_status_hint(workspace_dir)
 
     proxy_mounts = _build_proxy_mounts(config)
 
@@ -1128,15 +1155,42 @@ async def _run_interactive(config: dict, args):
         else:
             pt_session = DummyPromptSession()
 
+        # 自动加载默认命令文件
+        # 若文件以 [Command] 开头：其后每一行作为命令在启动时逐条执行
+        # 否则整个文件内容作为默认提示发送给 AI
+        default_prompt, startup_commands = _parse_foxcode_md(workspace_dir)
+        if startup_commands:
+            console.print(
+                f"[dim]已加载默认命令: .foxcode/foxcode.md "
+                f"({len(startup_commands)} 条启动命令)[/dim]"
+            )
+        elif default_prompt:
+            console.print(
+                f"[dim]已加载默认提示: .foxcode/foxcode.md "
+                f"({len(default_prompt)} 字符)[/dim]"
+            )
+
         async def _run_loop():
-            nonlocal all_messages, terminal_mode, terminal_cwd, pending_skill
+            nonlocal \
+                all_messages, \
+                terminal_mode, \
+                terminal_cwd, \
+                pending_skill, \
+                default_prompt
             while True:
                 try:
-                    if terminal_mode:
-                        prompt_text = f"{terminal_cwd}> "
+                    if startup_commands:
+                        prompt = startup_commands.pop(0)
+                        console.print(Text(f">> {prompt}", style="dim"))
+                    elif default_prompt is not None:
+                        prompt = default_prompt
+                        default_prompt = None
                     else:
-                        prompt_text = ">> "
-                    prompt = (await pt_session.prompt_async(prompt_text)).strip()
+                        if terminal_mode:
+                            prompt_text = f"{terminal_cwd}> "
+                        else:
+                            prompt_text = ">> "
+                        prompt = (await pt_session.prompt_async(prompt_text)).strip()
                 except (EOFError, KeyboardInterrupt):
                     break
 
@@ -1609,14 +1663,14 @@ async def _run_interactive(config: dict, args):
                     if summary:
                         console.print(f"  [bold cyan]工具调用: {summary}[/bold cyan]")
 
-                    usage_summary = deps.tool_tracker.usage_summary(config["model"])
-                    if usage_summary:
-                        console.print(f"  [dim]用量: {usage_summary}[/dim]")
-
                     print_action_plan(plan)
                     # 展示本轮变更摘要
                     if plan.files_modified:
                         _show_colored_diff(workspace_dir, plan.files_modified)
+
+                    usage_summary = deps.tool_tracker.usage_summary(config["model"])
+                    if usage_summary:
+                        console.print(f"  [dim]用量: {usage_summary}[/dim]")
 
                 except UnexpectedModelBehavior as e:
                     console.print(f"[red]API 响应格式错误: {e}[/red]")
