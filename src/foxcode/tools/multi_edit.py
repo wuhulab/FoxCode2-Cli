@@ -12,7 +12,9 @@ from .file_ops import _resolve_safe_path
 from .security import check_content_security, format_security_warnings
 
 
-def _fuzzy_find(content: str, old_string: str, threshold: float = 0.85) -> Optional[tuple[int, int]]:
+def _fuzzy_find(
+    content: str, old_string: str, threshold: float = 0.85
+) -> Optional[tuple[int, int]]:
     """在 content 中寻找与 old_string 最相似的片段，返回 (start, end)。
 
     使用 difflib.SequenceMatcher 滑动窗口匹配。
@@ -27,21 +29,24 @@ def _fuzzy_find(content: str, old_string: str, threshold: float = 0.85) -> Optio
     best_start = -1
 
     for i in range(len(content_lines) - old_len + 1):
-        window = content_lines[i:i + old_len]
+        window = content_lines[i : i + old_len]
         ratio = difflib.SequenceMatcher(None, old_lines, window).ratio()
         if ratio > best_ratio:
             best_ratio = ratio
             best_start = i
 
     if best_ratio >= threshold and best_start >= 0:
-        # 计算字节位置
+        # 计算字节位置（以实际匹配窗口的内容为准，避免行数与 old_string 不一致时偏移错误）
         start_pos = sum(len(line) + 1 for line in content_lines[:best_start])
-        end_pos = start_pos + len(old_string)
+        window = content_lines[best_start : best_start + old_len]
+        end_pos = start_pos + len("\n".join(window))
         return start_pos, end_pos
     return None
 
 
-def _apply_fuzzy_replace(content: str, old_string: str, new_string: str) -> tuple[str, bool, str]:
+def _apply_fuzzy_replace(
+    content: str, old_string: str, new_string: str
+) -> tuple[str, bool, str]:
     """尝试精确替换，失败则模糊匹配替换。
 
     返回 (new_content, success, message)。
@@ -50,7 +55,11 @@ def _apply_fuzzy_replace(content: str, old_string: str, new_string: str) -> tupl
     if count == 1:
         return content.replace(old_string, new_string, 1), True, "精确匹配替换成功"
     if count > 1:
-        return content, False, f"找到 {count} 处精确匹配，请提供更多上下文以确保唯一匹配"
+        return (
+            content,
+            False,
+            f"找到 {count} 处精确匹配，请提供更多上下文以确保唯一匹配",
+        )
 
     # 尝试模糊匹配
     fuzzy = _fuzzy_find(content, old_string)
@@ -59,7 +68,11 @@ def _apply_fuzzy_replace(content: str, old_string: str, new_string: str) -> tupl
         new_content = content[:start] + new_string + content[end:]
         return new_content, True, "模糊匹配替换成功"
 
-    return content, False, "未找到要替换的字符串（精确和模糊匹配均失败），请确认 old_string"
+    return (
+        content,
+        False,
+        "未找到要替换的字符串（精确和模糊匹配均失败），请确认 old_string",
+    )
 
 
 def register(agent):
@@ -120,13 +133,15 @@ def register(agent):
                     "请提供更多上下文或将 fuzzy 设为 True"
                 )
 
-            validated.append({
-                "filepath": filepath,
-                "filename": filename,
-                "old_string": old_string,
-                "new_string": new_string,
-                "original_content": content,
-            })
+            validated.append(
+                {
+                    "filepath": filepath,
+                    "filename": filename,
+                    "old_string": old_string,
+                    "new_string": new_string,
+                    "original_content": content,
+                }
+            )
 
         # 执行阶段 + 回滚记录
         applied = []
@@ -139,7 +154,9 @@ def register(agent):
                 filename = item["filename"]
 
                 if fuzzy:
-                    new_content, ok, msg = _apply_fuzzy_replace(content, old_string, new_string)
+                    new_content, ok, msg = _apply_fuzzy_replace(
+                        content, old_string, new_string
+                    )
                 else:
                     # 预验证阶段已保证非 fuzzy 模式下精确匹配唯一
                     new_content = content.replace(old_string, new_string, 1)
@@ -149,15 +166,19 @@ def register(agent):
                 if not ok:
                     # 回滚已应用的
                     for prev in applied:
-                        prev["filepath"].write_text(prev["original_content"], encoding="utf-8")
+                        prev["filepath"].write_text(
+                            prev["original_content"], encoding="utf-8"
+                        )
                     return f"错误: 编辑 {filename} 失败 - {msg}，已回滚之前所有编辑"
 
                 filepath.write_text(new_content, encoding="utf-8")
-                applied.append({
-                    "filepath": filepath,
-                    "filename": filename,
-                    "original_content": content,
-                })
+                applied.append(
+                    {
+                        "filepath": filepath,
+                        "filename": filename,
+                        "original_content": content,
+                    }
+                )
                 ctx.deps.tool_tracker.add_chars(len(new_content))
         except Exception as e:
             for prev in applied:
@@ -166,7 +187,9 @@ def register(agent):
 
         # 记录撤销（组合操作）
         for prev in reversed(applied):
-            ctx.deps.undo_manager.record("write", prev["filename"], old_content=prev["original_content"])
+            ctx.deps.undo_manager.record(
+                "write", prev["filename"], old_content=prev["original_content"]
+            )
 
         files = ", ".join(a["filename"] for a in applied)
         return f"已成功原子性编辑 {len(applied)} 个文件: {files}"
@@ -215,7 +238,9 @@ def register(agent):
                         content += "\n"
                     filepath.write_text(content, encoding="utf-8")
                     ctx.deps.undo_manager.record("create", filename)
-                    applied.append({"filename": filename, "type": "create", "original": None})
+                    applied.append(
+                        {"filename": filename, "type": "create", "original": None}
+                    )
                     continue
 
                 if not filepath.exists():
@@ -229,7 +254,9 @@ def register(agent):
 
                 filepath.write_text(new_content, encoding="utf-8")
                 ctx.deps.undo_manager.record("write", filename, old_content=original)
-                applied.append({"filename": filename, "type": "write", "original": original})
+                applied.append(
+                    {"filename": filename, "type": "write", "original": original}
+                )
                 ctx.deps.tool_tracker.add_chars(len(new_content))
         except Exception as e:
             _rollback_diff(applied, ctx.deps.workspace_dir)
@@ -272,7 +299,9 @@ def register(agent):
             if warning:
                 ctx.deps.console.print(warning)
 
-            validated.append({"filepath": filepath, "filename": filename, "content": content})
+            validated.append(
+                {"filepath": filepath, "filename": filename, "content": content}
+            )
 
         created = []
         try:
@@ -326,12 +355,14 @@ def _parse_unified_diff(diff_text: str) -> list[dict]:
                     else:
                         hunk_lines.append(lines[i])
                     i += 1
-                patches.append({
-                    "old_file": old_file,
-                    "new_file": new_file,
-                    "lines": hunk_lines,
-                    "is_new": is_new,
-                })
+                patches.append(
+                    {
+                        "old_file": old_file,
+                        "new_file": new_file,
+                        "lines": hunk_lines,
+                        "is_new": is_new,
+                    }
+                )
                 continue
         i += 1
     return patches
@@ -358,7 +389,7 @@ def _apply_patch(original: str, patch: dict, fuzzy: bool) -> tuple[str, bool, st
     best_ratio = 0.0
     best_start = -1
     for i in range(max(0, len(original_lines) - patch_len + 1)):
-        window = original_lines[i:i + patch_len]
+        window = original_lines[i : i + patch_len]
         ratio = difflib.SequenceMatcher(None, target_lines, window).ratio()
         if ratio > best_ratio:
             best_ratio = ratio
@@ -370,7 +401,7 @@ def _apply_patch(original: str, patch: dict, fuzzy: bool) -> tuple[str, bool, st
         new_lines = (
             original_lines[:best_start]
             + target_lines
-            + original_lines[best_start + patch_len:]
+            + original_lines[best_start + patch_len :]
         )
         return "\n".join(new_lines), True, f"匹配度 {best_ratio:.0%}"
 

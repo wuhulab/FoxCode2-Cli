@@ -9,12 +9,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 import httpx
+import pytest
 from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 
 from foxcode.agent import create_agent
 from foxcode.goal import GoalVerification, create_goal_verifier, verify_goal
-from foxcode.models import ActionPlan, ToolTracker, UndoManager, WorkspaceDeps
+from foxcode.models import ToolTracker, UndoManager, WorkspaceDeps
 from foxcode.permissions import PermissionManager
 from foxcode.skills import SkillsManager
 from foxcode.subagents import SubAgentManager, create_subagent_agent
@@ -148,9 +149,6 @@ def test_permission_default_mode_accepts_edits():
     assert perms.check("create_file", (), {"filename": "x.py", "content": "hi"}) is None
     # 但 run_shell 仍需拒绝/询问（headless 下拒绝）
     assert perms.check("run_shell", (), {"command": "npm install"}) is not None
-
-
-import pytest
 
 
 @pytest.mark.asyncio
@@ -515,8 +513,6 @@ def test_mcp_process_closure_binding():
     """MCP _process 闭包应正确绑定 server name，避免所有工具共用最后一个 name。"""
     import asyncio
 
-    from foxcode.mcp_manager import load_mcp_toolsets
-
     # 通过 inspect 检查生成的闭包中绑定的名称
     # 由于 MCPToolset 需要真实连接，这里只验证工厂函数行为
     processes = []
@@ -547,6 +543,65 @@ async def test_generate_commit_message_returns_str_on_error():
     )
     assert isinstance(result, str), f"期望 str，实际 {type(result)}"
     assert result == ""
+
+
+def test_read_file_range_reads_to_end_by_default():
+    """read_file_range 默认（end_line=0）应读取到文件末尾，而非返回空。"""
+    import tempfile
+
+    from foxcode.tools.file_ops import _read_file_range
+
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "demo.py"
+        p.write_text("line1\nline2\nline3\nline4\n", encoding="utf-8")
+
+        # 从第 2 行读到末尾
+        start, end, total, output = _read_file_range(p, 2, 0)
+        assert total == 4
+        assert (start, end) == (2, 4)
+        assert output == "line2\nline3\nline4\n"
+
+        # 指定区间
+        start, end, total, output = _read_file_range(p, 2, 3)
+        assert (start, end) == (2, 3)
+        assert output == "line2\nline3\n"
+
+        # 结束行超出总行数时读取到末尾
+        start, end, total, output = _read_file_range(p, 3, 999)
+        assert (start, end) == (3, 4)
+        assert output == "line3\nline4\n"
+
+        # 起始行超出总行数应报错
+        with pytest.raises(ValueError):
+            _read_file_range(p, 5, 0)
+
+        # start_line 为 1、end_line 为 0 的常见默认场景
+        start, end, total, output = _read_file_range(p, 1, 0)
+        assert output == "line1\nline2\nline3\nline4\n"
+
+
+def test_fuzzy_find_replacement_preserves_content():
+    """模糊匹配应返回正确的替换区间，替换后不损坏文件其余内容。"""
+    from foxcode.tools.multi_edit import _fuzzy_find
+
+    content = "def add(a, b):\n    return a + b\n\ndef sub(a, b):\n    return a - b\n"
+    # old_string 与文件内容存在细微差异（例如缩进不同），应能模糊匹配
+    fuzzy = _fuzzy_find(content, "    return a + b", threshold=0.85)
+    assert fuzzy is not None, "应能模糊匹配到 return a + b"
+    start, end = fuzzy
+    assert content[start:end] == "    return a + b", (
+        f"匹配区间 [{start}:{end}] 内容错误: {content[start:end]!r}"
+    )
+
+    # 边界：匹配窗口实际行内容与 old_string 长度不同时，
+    # end_pos 应基于窗口内容而非 len(old_string)，否则会损坏文件。
+    content = "aaa\nbb\n"
+    multi = _fuzzy_find(content, "aaa\nxxxxxxx", threshold=0.4)
+    assert multi is not None
+    start, end = multi
+    assert content[start:end] == "aaa\nbb", (
+        f"匹配区间 [{start}:{end}] 错误: {content[start:end]!r}"
+    )
 
 
 if __name__ == "__main__":

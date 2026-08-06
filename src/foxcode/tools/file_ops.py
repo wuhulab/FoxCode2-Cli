@@ -27,6 +27,30 @@ def _resolve_safe_path(workspace_dir: Path, filename: str) -> Path:
     return resolved
 
 
+def _read_file_range(
+    filepath: Path, start_line: int, end_line: int
+) -> tuple[int, int, int, str]:
+    """读取文件的指定行范围，返回 (起始行, 结束行, 总行数, 选中内容)。
+
+    end_line 为 0 或超出总行数时读取到文件末尾。
+    start_line 超出总行数时抛 ValueError。
+    """
+    total = 0
+    selected: list[str] = []
+    with filepath.open("r", encoding="utf-8", errors="replace") as f:
+        for idx, line in enumerate(f, 1):
+            total = idx
+            if idx >= start_line and (end_line == 0 or idx <= end_line):
+                selected.append(line)
+    if start_line < 1:
+        start_line = 1
+    if end_line == 0 or end_line > total:
+        end_line = total
+    if start_line > total:
+        raise ValueError(f"起始行 {start_line} 超出文件总行数 {total}")
+    return start_line, end_line, total, "".join(selected)
+
+
 def _warn_security(ctx: RunContext[WorkspaceDeps], content: str):
     findings = check_content_security(content)
     warning = format_security_warnings(findings)
@@ -70,24 +94,13 @@ def register(agent):
         if not filepath.is_file():
             return f"错误: {filename} 不是一个文件"
         try:
-            from itertools import islice
-
-            total = 0
-            with filepath.open("r", encoding="utf-8", errors="replace") as f:
-                # 逐行读取，快速跳过起始行，不加载整个文件到内存
-                skipped = islice(f, max(0, start_line - 1), None)
-                selected = list(islice(skipped, max(0, end_line - start_line + 1)))
-                f.seek(0)
-                total = sum(1 for _ in f)
+            start_line, end_line, total, output = _read_file_range(
+                filepath, start_line, end_line
+            )
+        except ValueError as e:
+            return f"错误: {e}"
         except Exception as e:
             return f"错误: 读取文件失败 - {e}"
-        if start_line < 1:
-            start_line = 1
-        if end_line == 0 or end_line > total:
-            end_line = total
-        if start_line > total:
-            return f"错误: 起始行 {start_line} 超出文件总行数 {total}"
-        output = "".join(selected)
         ctx.deps.tool_tracker.add_chars(len(output))
         header = f"[文件 {filename} 第 {start_line}-{end_line} 行 / 共 {total} 行]\n"
         return header + output

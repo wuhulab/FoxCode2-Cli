@@ -23,6 +23,13 @@ from .config import (
     BUILTIN_FREE_BASE_URL,
     BUILTIN_FREE_API_KEY,
 )
+
+try:
+    from importlib.metadata import version as _pkg_version
+
+    __version__ = _pkg_version("foxcode2")
+except Exception:
+    __version__ = "0.5.1"
 from .permissions import PermissionManager
 from .tools import run_subprocess
 
@@ -229,7 +236,7 @@ def parse_args(argv=None):
 
 def print_welcome():
     title = Panel.fit(
-        "[bold cyan]FoxCode Cli[/bold cyan] v0.5.0\n"
+        f"[bold cyan]FoxCode Cli[/bold cyan] v{__version__}\n"
         "[yellow]/help[/yellow] 查看命令  "
         "[yellow]/goal[/yellow] 目标验收  "
         "[yellow]/plan[/yellow] 计划模式  "
@@ -456,19 +463,13 @@ def print_action_plan(plan: ActionPlan, skip_explanation: bool = False):
 
 
 async def _show_colored_diff(workspace_dir: Path, files: list[str]):
-    """展示有修改的文件的 diff 预览。"""
+    """展示有修改的文件的 diff 摘要。"""
     if not files:
         return
-    # 只对本次修改的文件做 git diff，避免整仓库扫描
-    quoted = [f'"{f}"' for f in files]
-    result = await _exec_shell(
-        "git diff --no-color -- " + " ".join(quoted), workspace_dir, timeout=15
-    )
-    if not result or "退出码" in result:
-        return
-    # 简化为只显示修改摘要
-    stat = await _exec_shell(
-        "git diff --stat -- " + " ".join(quoted), workspace_dir, timeout=10
+    # 只对本次修改的文件做 git diff，避免整仓库扫描；
+    # 使用参数列表形式避免文件名被解释为 shell 命令。
+    stat = await _exec_shell_args(
+        ["git", "diff", "--stat", "--"] + files, workspace_dir, timeout=10
     )
     if (
         stat
@@ -1111,10 +1112,6 @@ async def _run_headless(
         if plan is None:
             return
 
-        if usage:
-            deps.tool_tracker.record_usage(
-                usage.input_tokens or 0, usage.output_tokens or 0, config["model"]
-            )
         if args.output_format == "json":
             payload = {
                 "explanation": plan.explanation,
@@ -1853,7 +1850,7 @@ async def _run_interactive(config: dict, args):
 async def main_async():
     args = parse_args()
     if args.version:
-        console.print("FoxCode v0.5.0")
+        console.print(f"FoxCode v{__version__}")
         return
 
     if args.prompt is None and args.query:

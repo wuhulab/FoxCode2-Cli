@@ -107,8 +107,12 @@ _SENSITIVE_PATTERNS = [
 ]
 _SENSITIVE_FILE_RE = re.compile("|".join(_SENSITIVE_PATTERNS), re.IGNORECASE)
 
-# 工具分类（默认 ask 的未知工具）
-ACTION_TOOLS = WRITE_TOOLS | {"run_shell"}
+
+# 工具分类：非只读工具一律视为 action（MCP 工具同样走 action 兜底逻辑）
+def _classify(tool_name: str) -> str:
+    """返回工具类别: read | action。"""
+    return "read" if tool_name in READ_ONLY_TOOLS else "action"
+
 
 # 只读 shell 命令（自动放行，无需确认）
 # 注意：只允许无 shell 元字符的单条命令（见 _SHELL_METACHARS_RE 校验），
@@ -149,19 +153,6 @@ READONLY_SHELL_PREFIXES = (
 # shell 元字符：包含这些字符的命令绝不自动放行（需用户确认）
 # 覆盖 ; & && || | < > 反引号 $() 换行（同时兼容 cmd.exe 与 bash）
 _SHELL_METACHARS_RE = re.compile(r"[;&|<>`\r\n]|\$\(")
-
-
-def _classify(tool_name: str) -> str:
-    """返回工具类别: read | action | unknown。"""
-    if tool_name in READ_ONLY_TOOLS:
-        return "read"
-    if tool_name in WRITE_TOOLS:
-        return "action"
-    if tool_name.startswith(("mcp__",)) or "__" in tool_name:
-        return "mcp"
-    if tool_name in ACTION_TOOLS:
-        return "action"
-    return "action"
 
 
 def is_write_tool(tool_name: str) -> bool:
