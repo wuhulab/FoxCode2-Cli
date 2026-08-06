@@ -114,6 +114,6 @@ jobs:
 
       - name: 验证安装
         run: |
-          pip install foxcode --no-cache-dir
+          pip install foxcode2 --no-cache-dir
           foxcode --help || echo "命令可能需要额外配置"
         continue-on-error: true
