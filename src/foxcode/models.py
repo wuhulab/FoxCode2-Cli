@@ -81,6 +81,7 @@ STATUS_NAMES = {
     "list_skills": "列出技能中",
     "use_skill_file": "读取技能文件中",
     "list_skill_files": "列出技能文件中",
+    "update_memory": "更新记忆中",
 }
 
 COUNT_LABELS = {
@@ -128,6 +129,7 @@ COUNT_LABELS = {
     "list_skills": ("列出技能", "list-skills"),
     "use_skill_file": ("读取技能文件", "use-skill-file"),
     "list_skill_files": ("列出技能文件", "list-skill-files"),
+    "update_memory": ("记忆更新", "memory"),
 }
 
 

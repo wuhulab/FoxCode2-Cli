@@ -58,6 +58,7 @@ def _make_prompt_session(history_file: Path):
             ("/solo", "切换无人值守模式"),
             ("/permissions", "查看权限设置"),
             ("/free", "切换到内置免费 API 并选择模型"),
+            ("/openai", "切换回 .env 配置的模型"),
             ("/model", "配置模型参数"),
             ("/mcp", "列出 MCP 服务器"),
             ("/skills", "列出可用 Skills"),
@@ -269,6 +270,7 @@ def print_help():
     table.add_row("/solo", "切换无人值守模式（自动放行，只拦截高危命令）")
     table.add_row("/permissions", "查看当前权限模式与规则")
     table.add_row("/free", "切换到内置免费 API 并选择模型")
+    table.add_row("/openai", "切换回 .env 中配置的模型参数")
     table.add_row("/model", "配置模型参数（兼容 OpenAI URL 格式）")
     table.add_row("/mcp", "列出已配置的 MCP 服务器")
     table.add_row("/skills", "列出可用 Skills")
@@ -1007,6 +1009,7 @@ async def _run_headless(
     subagents_mgr,
     mcp_toolsets,
     args,
+    project_config: dict,
 ):
     from .models import WorkspaceDeps, UndoManager
     from .agent import create_agent
@@ -1037,9 +1040,12 @@ async def _run_headless(
         agent = create_agent(
             config,
             http_client,
+            project_config["instructions"],
             mcp_toolsets=mcp_toolsets,
             skills_list=skills_list,
             subagent_list=subagent_list,
+            rules=project_config["rules"],
+            memory=project_config["memory"],
         )
         deps = WorkspaceDeps(
             workspace_dir=config["workspace_dir"].resolve(),
@@ -1047,6 +1053,7 @@ async def _run_headless(
             undo_manager=UndoManager(),
             console=console,
             shell_timeout=config["shell_timeout"],
+            project_instructions=project_config["instructions"],
             permissions=perms,
             plan_mode=False,
             skills=skills_mgr,
@@ -1070,9 +1077,12 @@ async def _run_headless(
                 agent = create_agent(
                     config,
                     http_client,
+                    project_config["instructions"],
                     mcp_toolsets=None,
                     skills_list=skills_list,
                     subagent_list=subagent_list,
+                    rules=project_config["rules"],
+                    memory=project_config["memory"],
                 )
                 try:
                     async with agent:
@@ -1147,6 +1157,14 @@ async def _run_interactive(config: dict, args):
         console.print(
             f"[dim]项目指南: .foxcode/instructions.md 已加载 ({len(project_config['instructions'])} 字符)[/dim]"
         )
+    if project_config["rules"]:
+        console.print(
+            f"[dim]用户规则: .foxcode/Rules.md 已加载 ({len(project_config['rules'])} 字符, AI 只读)[/dim]"
+        )
+    if project_config["memory"]:
+        console.print(
+            f"[dim]项目记忆: .foxcode/Memory.md 已加载 ({len(project_config['memory'])} 字符)[/dim]"
+        )
     if mcp_toolsets:
         console.print(f"[dim]MCP 服务器: {len(mcp_toolsets)} 个已配置[/dim]")
     console.print()
@@ -1185,6 +1203,8 @@ async def _run_interactive(config: dict, args):
             mcp_toolsets=mcp_toolsets,
             skills_list=skills_list,
             subagent_list=subagent_list,
+            rules=project_config["rules"],
+            memory=project_config["memory"],
         )
 
         all_messages = []
@@ -1369,6 +1389,8 @@ async def _run_interactive(config: dict, args):
                             mcp_toolsets=mcp_toolsets,
                             skills_list=skills_list,
                             subagent_list=subagent_list,
+                            rules=project_config["rules"],
+                            memory=project_config["memory"],
                         )
                         if mcp_toolsets:
                             try:
@@ -1380,6 +1402,54 @@ async def _run_interactive(config: dict, args):
                         agent = new_agent
                         console.print(
                             f"[green]已切换到内置免费 API，当前模型: {config['model']}[/green]"
+                        )
+                        continue
+                    elif cmd == "/openai":
+                        env_config = load_config()
+                        for key in ("model", "base_url", "api_key"):
+                            config[key] = env_config[key]
+
+                        settings_path = workspace_dir / ".foxcode" / "settings.json"
+                        try:
+                            if settings_path.exists():
+                                settings = json.loads(
+                                    settings_path.read_text(encoding="utf-8")
+                                )
+                            else:
+                                settings = {}
+                        except Exception:
+                            settings = {}
+                        for key in ("model", "base_url", "api_key"):
+                            settings.pop(key, None)
+                        try:
+                            settings_path.parent.mkdir(parents=True, exist_ok=True)
+                            settings_path.write_text(
+                                json.dumps(settings, ensure_ascii=False, indent=2),
+                                encoding="utf-8",
+                            )
+                        except Exception as e:
+                            console.print(f"  [yellow]保存配置失败: {e}[/yellow]")
+
+                        new_agent = create_agent(
+                            config,
+                            http_client,
+                            project_config["instructions"],
+                            mcp_toolsets=mcp_toolsets,
+                            skills_list=skills_list,
+                            subagent_list=subagent_list,
+                            rules=project_config["rules"],
+                            memory=project_config["memory"],
+                        )
+                        if mcp_toolsets:
+                            try:
+                                await new_agent.__aenter__()
+                            except Exception as e:
+                                console.print(
+                                    f"  [yellow]新 Agent MCP 初始化失败: {e}[/yellow]"
+                                )
+                        agent = new_agent
+                        console.print(
+                            f"[green]已切换回 .env 配置，当前模型: {config['model']}[/green]"
                         )
                         continue
                     elif cmd == "/model":
@@ -1826,6 +1896,8 @@ async def _run_interactive(config: dict, args):
                     mcp_toolsets=None,
                     skills_list=skills_list,
                     subagent_list=subagent_list,
+                    rules=project_config["rules"],
+                    memory=project_config["memory"],
                 )
                 async with agent:
                     await _run_loop()
@@ -1883,7 +1955,13 @@ async def main_async():
             perms.solo_mode = True
         try:
             await _run_headless(
-                config, perms, skills_mgr, subagents_mgr, mcp_toolsets, args
+                config,
+                perms,
+                skills_mgr,
+                subagents_mgr,
+                mcp_toolsets,
+                args,
+                project_config,
             )
         finally:
             pass

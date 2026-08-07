@@ -12,7 +12,13 @@ BUILTIN_FREE_API_KEY = "sk-C4Dy0S5OFKJ7QoPu8erQc2tTDklW2fBIry34CA8tmFcC1tGr"
 
 def load_project_config(workspace_dir: Path) -> dict:
     foxcode_dir = workspace_dir / ".foxcode"
-    config = {"instructions": "", "settings": {}, "commands": {}}
+    config = {
+        "instructions": "",
+        "settings": {},
+        "commands": {},
+        "rules": "",
+        "memory": "",
+    }
 
     instructions_file = foxcode_dir / "instructions.md"
     if instructions_file.exists():
@@ -20,6 +26,20 @@ def load_project_config(workspace_dir: Path) -> dict:
             config["instructions"] = instructions_file.read_text(
                 encoding="utf-8"
             ).strip()
+        except Exception:
+            pass
+
+    rules_file = foxcode_dir / "Rules.md"
+    if rules_file.exists():
+        try:
+            config["rules"] = rules_file.read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+
+    memory_file = foxcode_dir / "Memory.md"
+    if memory_file.exists():
+        try:
+            config["memory"] = memory_file.read_text(encoding="utf-8").strip()
         except Exception:
             pass
 

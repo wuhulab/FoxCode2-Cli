@@ -28,6 +28,8 @@ def create_agent(
     mcp_toolsets: list | None = None,
     skills_list: list[tuple[str, str]] | None = None,
     subagent_list: list[tuple[str, str]] | None = None,
+    rules: str = "",
+    memory: str = "",
 ) -> Agent[WorkspaceDeps, ActionPlan]:
     model = OpenAIChatModel(
         config["model"],
@@ -49,6 +51,27 @@ def create_agent(
             "## Project Guidelines\n"
             "The following guidelines are provided by the project and must be strictly followed:\n"
             f"{project_instructions}"
+        )
+
+    if rules:
+        system_prompt += (
+            "\n\n---\n"
+            "## User Rules (read-only)\n"
+            "The following rules are set by the user in .foxcode/Rules.md. They are the highest priority "
+            "constraints and must be strictly obeyed. This file is read-only for you: never edit, delete, "
+            "rename, or copy onto it.\n"
+            f"{rules}"
+        )
+
+    if memory:
+        system_prompt += (
+            "\n\n---\n"
+            "## Project Memory (AI-maintained)\n"
+            "The following notes live in .foxcode/Memory.md. They record important project knowledge and "
+            "pitfalls learned by AI. Apply them to avoid known traps. When you learn something valuable "
+            "(important decisions, tricky pitfalls, gotchas), persist it by calling the update_memory tool "
+            "with the full new content of Memory.md. Keep it concise and well-organized.\n"
+            f"{memory}"
         )
 
     if skills_list:

@@ -24,6 +24,7 @@
 - **Subagents**: 通过 `.foxcode/agents/` 定义只读子代理，用 `task` 工具调用
 - **Skills**: 通过 `.foxcode/skills/` 定义技能，按需注入提示
 - **MCP 支持**: 通过 `.foxcode/mcp.json` 接入任意 MCP 服务器（stdio / HTTP）
+- **项目记忆与用户规则**: `.foxcode/Memory.md` 由 AI 维护重要项目知识/踩坑点（`update_memory` 工具）；`.foxcode/Rules.md` 为用户规则（AI 只读，所有文件写工具强制拦截）
 - **Headless 模式**: 一条命令或管道输入即可无人值守运行，支持 JSON 输出
 
 ## 快速开始

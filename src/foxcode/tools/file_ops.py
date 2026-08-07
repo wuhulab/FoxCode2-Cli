@@ -8,6 +8,31 @@ from .security import check_content_security, format_security_warnings
 # 缓存已解析的工作区路径（同一 workspace 的多次文件操作无需重复 resolve）
 _workspace_norm_cache: dict[str, str] = {}
 
+# 受保护文件（规范化相对路径）：AI 不可通过普通文件工具修改
+PROTECTED_WRITE = {
+    ".foxcode/rules.md",
+    ".foxcode/memory.md",
+}
+
+
+def check_protected_write(filename: str) -> str | None:
+    """检查 filename 是否落入受保护文件，返回拒绝原因（None 表示可写）。
+
+    - .foxcode/Rules.md: 用户规则，AI 只读，禁止任何修改
+    - .foxcode/Memory.md: AI 记忆，只能通过 update_memory 工具修改
+    """
+    norm = filename.replace("\\", "/").strip().lower()
+    while norm.startswith("./"):
+        norm = norm[2:]
+    if norm == ".foxcode/rules.md":
+        return (
+            ".foxcode/Rules.md 是用户规则文件，AI 只读，禁止修改；"
+            "如需调整规则请告知用户"
+        )
+    if norm == ".foxcode/memory.md":
+        return ".foxcode/Memory.md 只能通过 update_memory 工具修改"
+    return None
+
 
 def _resolve_safe_path(workspace_dir: Path, filename: str) -> Path:
     resolved = (workspace_dir / filename).resolve()
@@ -111,6 +136,9 @@ def register(agent):
     ) -> str:
         log_tool(ctx, "create_file", filename)
         _warn_security(ctx, content)
+        protected = check_protected_write(filename)
+        if protected:
+            return f"错误: {protected}"
         try:
             filepath = _resolve_safe_path(ctx.deps.workspace_dir, filename)
         except ValueError as e:
@@ -132,6 +160,9 @@ def register(agent):
     ) -> str:
         log_tool(ctx, "write_file", filename)
         _warn_security(ctx, new_string)
+        protected = check_protected_write(filename)
+        if protected:
+            return f"错误: {protected}"
         try:
             filepath = _resolve_safe_path(ctx.deps.workspace_dir, filename)
         except ValueError as e:
@@ -162,6 +193,9 @@ def register(agent):
     ) -> str:
         log_tool(ctx, "write_file_complete", filename)
         _warn_security(ctx, content)
+        protected = check_protected_write(filename)
+        if protected:
+            return f"错误: {protected}"
         try:
             filepath = _resolve_safe_path(ctx.deps.workspace_dir, filename)
         except ValueError as e:
@@ -186,6 +220,9 @@ def register(agent):
     ) -> str:
         log_tool(ctx, "append_file", filename)
         _warn_security(ctx, content)
+        protected = check_protected_write(filename)
+        if protected:
+            return f"错误: {protected}"
         try:
             filepath = _resolve_safe_path(ctx.deps.workspace_dir, filename)
         except ValueError as e:
@@ -208,6 +245,9 @@ def register(agent):
     @agent.tool(args_validator=permission_validator("delete_file"))
     async def delete_file(ctx: RunContext[WorkspaceDeps], filename: str) -> str:
         log_tool(ctx, "delete_file", filename)
+        protected = check_protected_write(filename)
+        if protected:
+            return f"错误: {protected}"
         try:
             filepath = _resolve_safe_path(ctx.deps.workspace_dir, filename)
         except ValueError as e:
@@ -232,6 +272,12 @@ def register(agent):
         ctx: RunContext[WorkspaceDeps], old_filename: str, new_filename: str
     ) -> str:
         log_tool(ctx, "rename_file", f"{old_filename} -> {new_filename}")
+        protected = check_protected_write(old_filename)
+        if protected:
+            return f"错误: {protected}"
+        protected = check_protected_write(new_filename)
+        if protected:
+            return f"错误: {protected}"
         try:
             old_path = _resolve_safe_path(ctx.deps.workspace_dir, old_filename)
             new_path = _resolve_safe_path(ctx.deps.workspace_dir, new_filename)

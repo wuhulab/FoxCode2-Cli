@@ -132,8 +132,26 @@ def register_core_tools(agent):
 
 def register_all_tools(agent):
     """注册全部工具（核心 + 增强），用于主代理。"""
-    from . import code_index, health, lsp_bridge, mode, multi_edit, preview, review
+    from . import (
+        code_index,
+        health,
+        lsp_bridge,
+        memory,
+        mode,
+        multi_edit,
+        preview,
+        review,
+    )
 
     register_core_tools(agent)
-    for mod in (mode, code_index, preview, review, health, lsp_bridge, multi_edit):
+    for mod in (
+        mode,
+        code_index,
+        preview,
+        review,
+        health,
+        lsp_bridge,
+        multi_edit,
+        memory,
+    ):
         mod.register(agent)

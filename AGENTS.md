@@ -13,7 +13,7 @@ foxcode/
 ├── cli.py              # 交互式终端 / headless 入口，命令解析与主循环
 ├── agent.py            # Agent 创建与工具注册
 ├── models.py           # 数据模型：ActionPlan, UndoManager, ToolTracker, WorkspaceDeps
-├── config.py           # 配置加载（.env + .foxcode/settings.json）
+├── config.py           # 配置加载（.env + .foxcode/settings.json + Rules.md/Memory.md）
 ├── permissions.py      # 权限确认系统：allow/ask/deny 规则、高危行为拦截
 ├── session.py          # 会话管理：保存/加载/导出
 ├── skills.py           # Skills 管理：可复用知识/工作流（支持目录型多文件 skill）
@@ -39,6 +39,7 @@ foxcode/
     ├── undo.py         # 撤销管理
     ├── mode.py         # 计划模式切换
     ├── security.py     # 安全检测
+    ├── memory.py       # AI 长期记忆（update_memory：维护 .foxcode/Memory.md）
     └── multi_edit.py   # 多文件批量编辑、diff 应用、批量创建
 ```
 
@@ -98,6 +99,7 @@ def register(agent):
 - `WRITE_TOOLS`: 写/执行工具默认需要确认
 - `BUILTIN_DANGEROUS`: 内置高危命令无条件拦截
 - `PermissionManager.decide()`: deny > ask > allow 优先级
+- 受保护文件（`.foxcode/Rules.md` 用户规则只读、`.foxcode/Memory.md` 仅允许 `update_memory` 工具修改）：在 `file_ops.py` 的 `check_protected_write()` 中统一拦截，覆盖 file_ops/multi_edit/copy_file 全部写工具
 
 ## 与 Claude Code 的差距清单
 
@@ -137,6 +139,7 @@ def register(agent):
 - [x] LSP 集成（基于 jedi） - 跳转定义、查找引用、类型信息
 - [x] IDE 插件（VSCode）
 - [x] Goal 模式（/goal）- AI 完成后由独立上下文验收 AI 确认目标，未完成则继续直到达成；支持 goal.md/plan.md/todo.md 持久化以抵抗上下文压缩，每轮自动 git 提交进度检查点
+- [x] 项目记忆与用户规则 - `.foxcode/Memory.md` 为 AI 可写记忆（通过 `update_memory` 工具，普通文件工具拦截）；`.foxcode/Rules.md` 为用户规则（AI 只读，所有文件写工具强制拦截）
 
 ├── vscode-extension/   # VS Code 插件
 │   ├── package.json

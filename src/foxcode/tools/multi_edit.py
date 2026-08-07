@@ -8,7 +8,7 @@ from pydantic_ai import RunContext
 
 from ..models import WorkspaceDeps
 from . import log_tool, permission_validator
-from .file_ops import _resolve_safe_path
+from .file_ops import _resolve_safe_path, check_protected_write
 from .security import check_content_security, format_security_warnings
 
 
@@ -108,6 +108,9 @@ def register(agent):
 
             if not filename:
                 return f"错误: 第 {i + 1} 个编辑缺少 filename"
+            protected = check_protected_write(filename)
+            if protected:
+                return f"错误: 第 {i + 1} 个编辑 - {protected}"
             try:
                 filepath = _resolve_safe_path(ctx.deps.workspace_dir, filename)
             except ValueError as e:
@@ -223,6 +226,10 @@ def register(agent):
                 if filename.startswith("b/"):
                     filename = filename[2:]
 
+                protected = check_protected_write(filename)
+                if protected:
+                    return f"错误: {protected}"
+
                 try:
                     filepath = _resolve_safe_path(ctx.deps.workspace_dir, filename)
                 except ValueError as e:
@@ -287,6 +294,9 @@ def register(agent):
             content = item.get("content", "")
             if not filename:
                 return f"错误: 第 {i + 1} 个文件缺少 filename"
+            protected = check_protected_write(filename)
+            if protected:
+                return f"错误: 第 {i + 1} 个文件 - {protected}"
             try:
                 filepath = _resolve_safe_path(ctx.deps.workspace_dir, filename)
             except ValueError as e:

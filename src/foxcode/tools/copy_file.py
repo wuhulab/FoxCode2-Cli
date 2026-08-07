@@ -1,7 +1,7 @@
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
 from . import log_tool, permission_validator
-from .file_ops import _resolve_safe_path
+from .file_ops import _resolve_safe_path, check_protected_write
 
 
 def register(agent):
@@ -12,6 +12,9 @@ def register(agent):
         destination: str,
     ) -> str:
         log_tool(ctx, "copy_file", f"{source} -> {destination}")
+        protected = check_protected_write(destination)
+        if protected:
+            return f"错误: {protected}"
         try:
             src = _resolve_safe_path(ctx.deps.workspace_dir, source)
             dst = _resolve_safe_path(ctx.deps.workspace_dir, destination)

@@ -3,6 +3,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from pydantic_ai.messages import ModelMessagesTypeAdapter
+
 
 class SessionManager:
     def __init__(self, sessions_dir: Path):
@@ -50,18 +52,13 @@ class SessionManager:
     def save_session(self, name: str, messages: list) -> str:
         path = self._session_path(name)
         try:
-            data = []
-            for msg in messages:
-                if hasattr(msg, "model_dump"):
-                    data.append(msg.model_dump())
-                elif hasattr(msg, "dict"):
-                    data.append(msg.dict())
-                else:
-                    data.append(str(msg))
+            data = ModelMessagesTypeAdapter.dump_python(
+                messages, mode="json", exclude_none=True
+            )
             path.write_text(
                 json.dumps(
                     {
-                        "version": 1,
+                        "version": 2,
                         "saved_at": datetime.now().isoformat(),
                         "message_count": len(messages),
                         "data": data,
@@ -80,8 +77,11 @@ class SessionManager:
         if not path.exists():
             return None
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            return data.get("data", [])
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            data = raw.get("data", [])
+            if raw.get("version", 1) >= 2:
+                return ModelMessagesTypeAdapter.validate_python(data)
+            return data
         except Exception:
             return None
 

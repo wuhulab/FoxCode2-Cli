@@ -60,6 +60,7 @@ WRITE_TOOLS = frozenset(
         "undo_last",
         "start_preview",
         "stop_preview",
+        "update_memory",
     }
 )
 

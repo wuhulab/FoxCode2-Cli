@@ -647,6 +647,102 @@ def test_fuzzy_find_replacement_preserves_content():
     )
 
 
+def test_session_save_load_roundtrip():
+    """Session 保存/加载应能往返还原 pydantic-ai 消息（含工具调用）。"""
+    from foxcode.session import SessionManager
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse,
+        UserPromptPart,
+        TextPart,
+        ToolCallPart,
+        ToolReturnPart,
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        mgr = SessionManager(Path(tmp) / "sessions")
+        messages = [
+            ModelRequest(
+                parts=[
+                    UserPromptPart(content="你好，请读取文件"),
+                    ToolReturnPart(
+                        tool_name="read_file",
+                        content="文件内容",
+                        tool_call_id="call_1",
+                    ),
+                ]
+            ),
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="read_file",
+                        args={"path": "a.py"},
+                        tool_call_id="call_1",
+                    ),
+                    TextPart(content="已读取"),
+                ]
+            ),
+        ]
+
+        result = mgr.save_session("demo", messages)
+        assert "会话已保存" in result
+
+        loaded = mgr.load_session("demo")
+        assert loaded is not None
+        assert len(loaded) == len(messages)
+
+        req = loaded[0]
+        assert isinstance(req, ModelRequest)
+        kinds = [type(p).__name__ for p in req.parts]
+        assert kinds == ["UserPromptPart", "ToolReturnPart"], f"实际: {kinds}"
+        tr = req.parts[1]
+        assert tr.tool_name == "read_file" and tr.tool_call_id == "call_1"
+
+        resp = loaded[1]
+        assert isinstance(resp, ModelResponse)
+        kinds = [type(p).__name__ for p in resp.parts]
+        assert kinds == ["ToolCallPart", "TextPart"], f"实际: {kinds}"
+        tc = resp.parts[0]
+        assert tc.tool_name == "read_file" and tc.tool_call_id == "call_1"
+
+    # 无会话时应返回 None
+    with tempfile.TemporaryDirectory() as tmp:
+        mgr = SessionManager(Path(tmp) / "sessions")
+        assert mgr.load_session("none") is None
+
+
+def test_session_save_string_tool_args_roundtrip():
+    """字符串形式的工具参数（部分模型的输出格式）也应能往返还原。"""
+    from foxcode.session import SessionManager
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse,
+        ToolCallPart,
+        UserPromptPart,
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        mgr = SessionManager(Path(tmp) / "sessions")
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="请执行")]),
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="shell",
+                        args='{"command":"dir"}',
+                        tool_call_id="call_x",
+                    )
+                ]
+            ),
+        ]
+        mgr.save_session("strargs", messages)
+        loaded = mgr.load_session("strargs")
+        assert loaded is not None and len(loaded) == 2
+        tc = loaded[1].parts[0]
+        assert isinstance(tc, ToolCallPart)
+        assert tc.tool_call_id == "call_x"
+
+
 if __name__ == "__main__":
     import json
 
