@@ -1,6 +1,10 @@
 import os
 from pathlib import Path
+from typing import Annotated
+
+from pydantic import AliasChoices, Field
 from pydantic_ai import RunContext
+
 from ..models import WorkspaceDeps
 from . import log_tool, permission_validator
 from .security import check_content_security, format_security_warnings
@@ -106,8 +110,14 @@ def register(agent):
     async def read_file_range(
         ctx: RunContext[WorkspaceDeps],
         filename: str,
-        start_line: int = 1,
-        end_line: int = 0,
+        start_line: Annotated[
+            int,
+            Field(validation_alias=AliasChoices("start_line", "startLine", "start")),
+        ] = 1,
+        end_line: Annotated[
+            int,
+            Field(validation_alias=AliasChoices("end_line", "endLine", "end")),
+        ] = 0,
     ) -> str:
         log_tool(ctx, "read_file_range", filename, f"{start_line}-{end_line or 'end'}")
         try:
@@ -156,7 +166,20 @@ def register(agent):
 
     @agent.tool(args_validator=permission_validator("write_file"))
     async def write_file(
-        ctx: RunContext[WorkspaceDeps], filename: str, old_string: str, new_string: str
+        ctx: RunContext[WorkspaceDeps],
+        filename: str,
+        old_string: Annotated[
+            str,
+            Field(
+                validation_alias=AliasChoices("old_string", "oldString", "oldcontent")
+            ),
+        ],
+        new_string: Annotated[
+            str,
+            Field(
+                validation_alias=AliasChoices("new_string", "newString", "newcontent")
+            ),
+        ],
     ) -> str:
         log_tool(ctx, "write_file", filename)
         _warn_security(ctx, new_string)
@@ -269,7 +292,19 @@ def register(agent):
 
     @agent.tool(args_validator=permission_validator("rename_file"))
     async def rename_file(
-        ctx: RunContext[WorkspaceDeps], old_filename: str, new_filename: str
+        ctx: RunContext[WorkspaceDeps],
+        old_filename: Annotated[
+            str,
+            Field(
+                validation_alias=AliasChoices("old_filename", "oldFilename", "old_path")
+            ),
+        ],
+        new_filename: Annotated[
+            str,
+            Field(
+                validation_alias=AliasChoices("new_filename", "newFilename", "new_path")
+            ),
+        ],
     ) -> str:
         log_tool(ctx, "rename_file", f"{old_filename} -> {new_filename}")
         protected = check_protected_write(old_filename)

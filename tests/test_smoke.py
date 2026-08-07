@@ -743,6 +743,104 @@ def test_session_save_string_tool_args_roundtrip():
         assert tc.tool_call_id == "call_x"
 
 
+def test_print_run_error_handles_api_errors():
+    """_print_run_error 应能打印各类临时 API 错误并返回 True（会话可继续）。"""
+    from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
+
+    from foxcode.cli import _print_run_error
+
+    assert _print_run_error(ModelAPIError("m", "连接中断")) is True
+    assert (
+        _print_run_error(
+            ModelHTTPError(
+                status_code=504,
+                model_name="m",
+                body={"error": "service unavailable"},
+            )
+        )
+        is True
+    )
+    assert _print_run_error(httpx.ReadTimeout("timeout")) is True
+    assert _print_run_error(httpx.RemoteProtocolError("reset")) is True
+    assert _print_run_error(httpx.ConnectError("refused")) is True
+    assert (
+        _print_run_error(
+            httpx.HTTPStatusError(
+                "服务不可用",
+                request=httpx.Request("GET", "http://x"),
+                response=httpx.Response(504),
+            )
+        )
+        is True
+    )
+    assert _print_run_error(RuntimeError("其他错误")) is True
+
+
+def test_goal_loop_api_error_returns_gracefully():
+    """Goal 模式中 API 错误不应崩溃会话，应返回当前进度而非抛出。"""
+    import asyncio
+
+    from pydantic_ai.exceptions import ModelAPIError
+
+    from foxcode.cli import _run_goal_loop
+
+    async def main():
+        with tempfile.TemporaryDirectory() as td:
+            deps = _make_deps(Path(td))
+            deps.permissions.headless = True
+
+            import foxcode.cli as cli_mod
+
+            async def _boom(*a, **k):
+                raise ModelAPIError("m", "connection error")
+
+            original = cli_mod._run_status_loop
+            cli_mod._run_status_loop = _boom
+            try:
+                messages = await _run_goal_loop(
+                    None,
+                    "创建一个 hello.py",
+                    [],
+                    deps,
+                    dict(CONFIG),
+                    max_iterations=2,
+                )
+                assert messages == [], f"应保留当前进度，实际: {messages}"
+            finally:
+                cli_mod._run_status_loop = original
+
+    asyncio.run(main())
+
+
+def test_write_file_camelcase_alias_validation():
+    """write_file 应容忍 camelCase 参数名（oldString/newString），避免校验崩溃。"""
+    from foxcode.agent import create_agent
+
+    agent = create_agent(dict(CONFIG), None)
+    tool = agent._function_toolset.tools["write_file"]
+    validator = tool.function_schema.validator
+
+    args = validator.validate_json(
+        '{"filename": "a.py", "oldString": "x", "newString": "y"}'
+    )
+    assert args == {"filename": "a.py", "old_string": "x", "new_string": "y"}
+
+    args = validator.validate_json(
+        '{"filename": "a.py", "old_string": "x", "new_string": "y"}'
+    )
+    assert args == {"filename": "a.py", "old_string": "x", "new_string": "y"}
+
+    from foxcode.tools.multi_edit import _normalize_edit
+
+    assert _normalize_edit(
+        {"filename": "a.py", "oldString": "x", "newString": "y"}
+    ) == {
+        "filename": "a.py",
+        "old_string": "x",
+        "new_string": "y",
+    }
+
+
 if __name__ == "__main__":
     import json
 

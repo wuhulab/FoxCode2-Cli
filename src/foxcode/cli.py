@@ -748,6 +748,71 @@ async def _run_with_narration(
     return all_messages, plan, usage
 
 
+def _print_run_error(e: Exception) -> bool:
+    """打印 AI 运行错误，返回 True 表示会话可继续。
+
+    临时性 API 错误（超时、连接中断、HTTP 5xx、格式错误等）打印友好提示并返回 True，
+    让交互式会话不因一次 API 抖动而崩溃，用户可稍后重试。
+    """
+    import traceback
+
+    from pydantic_ai.exceptions import (
+        ModelAPIError,
+        ModelHTTPError,
+        UnexpectedModelBehavior,
+    )
+
+    if isinstance(e, UnexpectedModelBehavior):
+        console.print(f"[red]API 响应格式错误: {e}[/red]")
+        if e.__cause__ is not None:
+            console.print(f"  [dim]根本原因: {e.__cause__}[/dim]")
+        console.print(
+            "  [yellow]该模型可能不完全兼容 OpenAI 格式。"
+            "请检查 API 地址、密钥是否正确，或尝试其他模型[/yellow]"
+        )
+        return True
+    if isinstance(e, ModelHTTPError):
+        detail = ""
+        if e.body:
+            detail = str(e.body)[:300]
+        console.print(
+            f"[red]API HTTP 错误 ({e.status_code}) 模型={e.model_name}: {detail}[/red]"
+        )
+        return True
+    if isinstance(e, ModelAPIError):
+        detail = str(e)
+        seen = {detail}
+        cause = e.__cause__
+        while cause:
+            cause_str = str(cause)
+            if cause_str not in seen:
+                detail += f" -> {cause_str}"
+                seen.add(cause_str)
+            cause = cause.__cause__
+        console.print(f"[red]API 错误: {detail}[/red]")
+        return True
+    if isinstance(e, (httpx.ReadTimeout, httpx.ReadError)):
+        console.print(
+            f"[red]读取超时: 与服务器的连接读取数据超时[/red]\n"
+            f"  [yellow]原因: {e}[/yellow]\n"
+            f"  [dim]提示: 可在 .foxcode/settings.json 中调大 request_timeout[/dim]"
+        )
+        return True
+    if isinstance(e, (httpx.RemoteProtocolError, httpx.LocalProtocolError)):
+        console.print(
+            f"[red]网络连接错误: 与 API 服务器的连接中断[/red]\n"
+            f"  [yellow]原因: {e}[/yellow]\n"
+            f"  [dim]提示: 请检查网络连接是否稳定，或 API 服务器是否正常运行[/dim]"
+        )
+        return True
+    if isinstance(e, (httpx.HTTPStatusError, httpx.TransportError)):
+        console.print(f"[red]API 请求错误: {e}[/red]")
+        return True
+    console.print(f"[red]错误: {e}[/red]")
+    console.print(f"[dim]{traceback.format_exc()}[/dim]")
+    return True
+
+
 async def _run_status_loop(
     agent,
     prompt: str | Sequence[Any] | None,
@@ -905,9 +970,17 @@ async def _run_goal_loop(
         work_prompt = (
             f"Complete the following goal:\n\n{goal}\n\n{GOAL_PERSIST_INSTRUCTION}"
         )
-        all_messages, plan = await _run_status_loop(
-            agent, work_prompt, all_messages, deps, config
-        )
+        try:
+            all_messages, plan = await _run_status_loop(
+                agent, work_prompt, all_messages, deps, config
+            )
+        except Exception as e:
+            _print_run_error(e)
+            console.print(
+                "  [yellow]本轮目标执行因 API 错误中断，已保留当前进度，"
+                "可稍后再次执行 /goal 继续[/yellow]"
+            )
+            return all_messages
 
         from .context_compressor import compress_messages
 
@@ -915,10 +988,17 @@ async def _run_goal_loop(
             len(all_messages) > 50
             or token_estimator.estimate(all_messages) > max_context_tokens
         ):
-            with console.status("[dim]智能压缩上下文中...[/dim]", spinner="fox"):
-                all_messages, summary_text = await compress_messages(
-                    all_messages, deps.http_client, config
+            try:
+                with console.status("[dim]智能压缩上下文中...[/dim]", spinner="fox"):
+                    all_messages, summary_text = await compress_messages(
+                        all_messages, deps.http_client, config
+                    )
+            except Exception as e:
+                _print_run_error(e)
+                console.print(
+                    "  [yellow]上下文压缩失败，将跳过压缩继续本轮验收[/yellow]"
                 )
+                summary_text = ""
             if summary_text:
                 console.print(
                     "  [dim]上下文已压缩，持久化文件 (goal.md/plan.md/todo.md) 将用于恢复进度[/dim]"
@@ -1128,11 +1208,6 @@ async def _run_interactive(config: dict, args):
     from .agent import create_agent
     from .session import SessionManager
     from .context_compressor import TokenEstimator
-    from pydantic_ai.exceptions import (
-        UnexpectedModelBehavior,
-        ModelHTTPError,
-        ModelAPIError,
-    )
 
     workspace_dir = config["workspace_dir"].resolve()
     workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -1329,9 +1404,16 @@ async def _run_interactive(config: dict, args):
                         if not goal_text:
                             console.print("[yellow]已取消（目标为空）[/yellow]")
                             continue
-                        all_messages = await _run_goal_loop(
-                            agent, goal_text, all_messages, deps, config
-                        )
+                        try:
+                            all_messages = await _run_goal_loop(
+                                agent, goal_text, all_messages, deps, config
+                            )
+                        except Exception as e:
+                            _print_run_error(e)
+                            console.print(
+                                "  [yellow]目标执行因错误中断，已保留当前进度，"
+                                "可稍后再次执行 /goal 继续[/yellow]"
+                            )
                         continue
                     elif cmd == "/plan":
                         deps.plan_mode = not deps.plan_mode
@@ -1836,49 +1918,8 @@ async def _run_interactive(config: dict, args):
                     if usage_summary:
                         console.print(f"  [dim]用量: {usage_summary}[/dim]")
 
-                except UnexpectedModelBehavior as e:
-                    console.print(f"[red]API 响应格式错误: {e}[/red]")
-                    if e.__cause__ is not None:
-                        console.print(f"  [dim]根本原因: {e.__cause__}[/dim]")
-                    console.print(
-                        "  [yellow]该模型可能不完全兼容 OpenAI 格式。"
-                        "请检查 API 地址、密钥是否正确，或尝试其他模型[/yellow]"
-                    )
-                except ModelHTTPError as e:
-                    detail = ""
-                    if e.body:
-                        detail = str(e.body)[:300]
-                    console.print(
-                        f"[red]API HTTP 错误 ({e.status_code}) 模型={e.model_name}: {detail}[/red]"
-                    )
-                except ModelAPIError as e:
-                    detail = str(e)
-                    seen = {detail}
-                    cause = e.__cause__
-                    while cause:
-                        cause_str = str(cause)
-                        if cause_str not in seen:
-                            detail += f" -> {cause_str}"
-                            seen.add(cause_str)
-                        cause = cause.__cause__
-                    console.print(f"[red]API 错误: {detail}[/red]")
-                except (httpx.ReadTimeout, httpx.ReadError) as e:
-                    console.print(
-                        f"[red]读取超时: 与服务器的连接读取数据超时[/red]\n"
-                        f"  [yellow]原因: {e}[/yellow]\n"
-                        f"  [dim]提示: 可在 .foxcode/settings.json 中调大 request_timeout[/dim]"
-                    )
-                except (httpx.RemoteProtocolError, httpx.LocalProtocolError) as e:
-                    console.print(
-                        f"[red]网络连接错误: 与 API 服务器的连接中断[/red]\n"
-                        f"  [yellow]原因: {e}[/yellow]\n"
-                        f"  [dim]提示: 请检查网络连接是否稳定，或 API 服务器是否正常运行[/dim]"
-                    )
                 except Exception as e:
-                    console.print(f"[red]错误: {e}[/red]")
-                    import traceback
-
-                    console.print(f"[dim]{traceback.format_exc()}[/dim]")
+                    _print_run_error(e)
 
         if mcp_toolsets:
             try:

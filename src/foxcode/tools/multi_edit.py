@@ -75,6 +75,27 @@ def _apply_fuzzy_replace(
     )
 
 
+_KEY_ALIASES = {
+    "filename": ("filename",),
+    "old_string": ("old_string", "oldString", "oldcontent"),
+    "new_string": ("new_string", "newString", "newcontent"),
+}
+
+
+def _normalize_edit(edit: dict) -> dict:
+    """将 edit dict 的键名归一化，容忍模型使用 camelCase 变体。"""
+    norm: dict = {}
+    for key in ("filename", "old_string", "new_string"):
+        value = edit.get(key)
+        if value is None:
+            for alias in _KEY_ALIASES[key][1:]:
+                if alias in edit:
+                    value = edit[alias]
+                    break
+        norm[key] = value if value is not None else ""
+    return norm
+
+
 def register(agent):
     @agent.tool(args_validator=permission_validator("multi_write_file"))
     async def multi_write_file(
@@ -91,6 +112,9 @@ def register(agent):
 
         if not edits:
             return "错误: edits 列表为空"
+
+        # 归一化键名（容忍 camelCase：oldString/newString 等）
+        edits = [_normalize_edit(e) for e in edits]
 
         # 安全警告检查
         for edit in edits:
