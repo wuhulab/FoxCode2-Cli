@@ -4,6 +4,7 @@ from ..models import WorkspaceDeps
 from . import log_tool, permission_validator, run_subprocess
 
 
+# NOTE:通过检测配置文件自动推断项目使用的包管理器
 def _detect_package_manager(workspace_dir: Path) -> str | None:
     if (workspace_dir / "package.json").exists():
         return "npm"
@@ -22,6 +23,7 @@ def _detect_package_manager(workspace_dir: Path) -> str | None:
     return None
 
 
+# NOTE:运行包管理器命令的通用包装，返回输出与退出码
 async def _run_cmd(cwd: Path, cmd: list[str], timeout: int = 120) -> tuple[str, int]:
     try:
         result = await run_subprocess(
@@ -45,6 +47,7 @@ async def _run_cmd(cwd: Path, cmd: list[str], timeout: int = 120) -> tuple[str, 
         return f"错误: 命令执行失败 - {e}", -1
 
 
+# NOTE:注册依赖安装工具：自动检测包管理器并适配 pip/npm/cargo/go/maven/gradle
 def register(agent):
     @agent.tool(args_validator=permission_validator("install_deps"))
     async def install_deps(

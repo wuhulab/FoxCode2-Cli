@@ -6,6 +6,8 @@ from ..models import WorkspaceDeps
 from . import log_tool, permission_validator
 
 
+# NOTE:注册网页搜索工具：通过必应搜索抓取结果，解析标题/链接/摘要
+# NOTE:注册网络搜索工具（Bing），解析 HTML 提取标题、链接与摘要片段
 def register(agent):
     @agent.tool(args_validator=permission_validator("web_search"))
     async def web_search(

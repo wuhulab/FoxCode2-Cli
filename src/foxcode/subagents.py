@@ -17,6 +17,7 @@ from .permissions import PermissionManager, is_write_tool
 from .tools import permission_validator
 
 
+# NOTE:子代理定义模型：包含名称、描述、系统提示、路径、可选模型与工具白名单
 @dataclass
 class SubAgentDef:
     name: str
@@ -27,12 +28,14 @@ class SubAgentDef:
     tools: list[str] | None = None
 
 
+# NOTE:子代理管理器：从 .foxcode/agents/ 加载定义文件，缓存已创建的 Agent 实例
 @dataclass
 class SubAgentManager:
     agents_dir: Path
     defs: dict[str, SubAgentDef] = field(default_factory=dict)
     _agent_cache: dict[str, Agent] = field(default_factory=dict)
 
+    # NOTE:扫描 agents 目录下所有 .md/.txt 文件，解析 YAML 前置元数据
     def load(self):
         self.defs = {}
         if not self.agents_dir.is_dir():
@@ -76,6 +79,7 @@ class SubAgentManager:
         return self.defs.get(name.strip().lower())
 
 
+# NOTE:分割 Markdown 前置 YAML 元数据与正文内容
 def _split_frontmatter(text: str) -> tuple[str | None, str]:
     import re
 
@@ -85,6 +89,7 @@ def _split_frontmatter(text: str) -> tuple[str | None, str]:
     return None, text
 
 
+# NOTE:子代理工具筛选器：默认仅暴露只读工具，防止子代理修改文件
 def _subagent_prepare(
     ctx: RunContext[WorkspaceDeps], tool_defs: list[ToolDefinition]
 ) -> list[ToolDefinition]:
@@ -92,6 +97,7 @@ def _subagent_prepare(
     return [td for td in tool_defs if not is_write_tool(td.name)]
 
 
+# NOTE:创建只读子代理 Agent，可定制模型与允许的工具白名单
 def create_subagent_agent(
     config: dict,
     http_client,
@@ -141,6 +147,7 @@ def create_subagent_agent(
     return child
 
 
+# NOTE:基于父会话构建子代理隔离依赖：继承权限、独立 tracker、清空项目指令
 def _child_deps(ctx: RunContext[WorkspaceDeps]) -> WorkspaceDeps:
     perms = PermissionManager(
         console=ctx.deps.console,
@@ -168,6 +175,7 @@ def _child_deps(ctx: RunContext[WorkspaceDeps]) -> WorkspaceDeps:
     )
 
 
+# NOTE:运行指定子代理执行只读探索任务，结果超长时自动截断并返回摘要
 async def run_subagent(
     ctx: RunContext[WorkspaceDeps],
     prompt: str,
@@ -237,6 +245,7 @@ async def run_subagent(
     return output
 
 
+# NOTE:注册 task 工具：主代理通过此工具委派只读子代理完成探索/分析任务
 def register(agent):
     @agent.tool(args_validator=permission_validator("task"))
     async def task(

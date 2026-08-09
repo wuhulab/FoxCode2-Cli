@@ -3,6 +3,8 @@ from ..models import WorkspaceDeps
 from . import log_tool, permission_validator
 
 
+# NOTE:注册撤销工具：支持撤销最近 N 步操作与查看操作历史
+# NOTE:注册撤销与历史查看工具，委托给 UndoManager 处理回滚
 def register(agent):
     @agent.tool(args_validator=permission_validator("undo_last"))
     async def undo_last(ctx: RunContext[WorkspaceDeps], steps: int = 1) -> str:

@@ -5,6 +5,7 @@ from ..models import WorkspaceDeps
 from . import log_tool, permission_validator, run_subprocess
 
 
+# NOTE:优先使用 ripgrep 进行项目中正则搜索，未安装时返回 None 触发 Python 回退
 async def _run_ripgrep(
     cwd: Path,
     pattern: str,
@@ -60,6 +61,7 @@ async def _run_ripgrep(
         return f"错误: 搜索失败 - {e}"
 
 
+# NOTE:纯 Python 实现的文件内容正则搜索（ripgrep 不可用时作为降级方案）
 def _python_grep(
     cwd: Path,
     pattern: str,
@@ -122,6 +124,7 @@ def _python_grep(
     return f"未找到匹配 '{pattern}' 的结果"
 
 
+# NOTE:注册项目内文本搜索工具：优先 ripgrep，不可用时降级为 Python 遍历
 def register(agent):
     @agent.tool(args_validator=permission_validator("search_in_files"))
     async def search_in_files(

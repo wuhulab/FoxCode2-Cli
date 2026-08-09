@@ -8,6 +8,7 @@ from ..models import WorkspaceDeps
 from . import log_tool, permission_validator, run_subprocess
 
 
+# NOTE:获取变更文件统计概览（git diff --stat）
 async def _get_git_diff(cwd: Path, staged: bool = False) -> str:
     try:
         args = ["git", "diff"]
@@ -24,6 +25,7 @@ async def _get_git_diff(cwd: Path, staged: bool = False) -> str:
         return ""
 
 
+# NOTE:获取完整 diff 内容（带行数上限截断），用于审查细节分析
 async def _get_full_diff(cwd: Path, staged: bool = False, max_lines: int = 500) -> str:
     try:
         args = ["git", "diff", "--no-color"]
@@ -47,6 +49,7 @@ async def _get_full_diff(cwd: Path, staged: bool = False, max_lines: int = 500) 
         return ""
 
 
+# NOTE:注册代码审查工具：基于 git diff 做启发式检查（调试语句、密钥、TODO 等）
 def register(agent):
     @agent.tool(args_validator=permission_validator("review_changes"))
     async def review_changes(

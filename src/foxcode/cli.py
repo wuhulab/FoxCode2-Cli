@@ -24,6 +24,7 @@ from .config import (
     BUILTIN_FREE_API_KEY,
 )
 
+# NOTE:版本号声明
 try:
     from importlib.metadata import version as _pkg_version
 
@@ -36,11 +37,12 @@ from .tools import run_subprocess
 if TYPE_CHECKING:
     from .models import ActionPlan, WorkspaceDeps
 
+# NOTE:旋转动画
 SPINNERS["fox"] = {"interval": 100, "frames": ["-", "/", "\\", "-"]}
 
 
+# NOTE:延迟导入 prompt_toolkit 构建增强输入会话，失败时回退到 input()
 def _make_prompt_session(history_file: Path):
-    """延迟导入 prompt_toolkit 构建增强输入会话，失败时回退到 input()。"""
     try:
         from prompt_toolkit import PromptSession
         from prompt_toolkit.completion import Completer, Completion
@@ -48,9 +50,8 @@ def _make_prompt_session(history_file: Path):
     except ImportError:
         return DummyPromptSession()
 
+    # NOTE:命令自动补全器
     class FoxCodeCompleter(Completer):
-        """命令自动补全器。"""
-
         COMMANDS = [
             ("/help", "显示帮助"),
             ("/goal ", "设定目标并自动验收循环"),
@@ -79,6 +80,7 @@ def _make_prompt_session(history_file: Path):
             ("/quit", "退出程序"),
         ]
 
+        # NOTE:放行/以外的内容抓取，触发补全功能
         def get_completions(self, document, complete_event):
             text = document.text
             if not text.startswith("/"):
@@ -87,6 +89,7 @@ def _make_prompt_session(history_file: Path):
                 if cmd.startswith(text):
                     yield Completion(cmd, start_position=-len(text), display_meta=desc)
 
+    # NOTE:属性定义：completer定义一个自动补全，history：历史持久化，multiline：不支持换行
     return PromptSession(
         completer=FoxCodeCompleter(),
         history=FileHistory(str(history_file)),
@@ -94,6 +97,7 @@ def _make_prompt_session(history_file: Path):
     )
 
 
+# NOTE:prompt_toolkit 缺失时的降级回退：直接使用标准 input()
 class DummyPromptSession:
     """当 prompt_toolkit 不可用时回退到 input()。"""
 
@@ -104,9 +108,11 @@ class DummyPromptSession:
         return input(prompt_text)
 
 
+# NOTE:全局 rich 控制台实例，负责所有终端输出格式化
 console = Console()
 
 
+# NOTE:带指数退避重试的 HTTP 客户端，自动处理 403/429/5xx 与网络抖动
 class RetryClient(httpx.AsyncClient):
     RETRY_STATUSES = frozenset({403, 429, 500, 502, 503, 504})
     MAX_RETRIES = 5
@@ -176,6 +182,7 @@ class RetryClient(httpx.AsyncClient):
                 await asyncio.sleep(wait)
 
 
+# NOTE:解析命令行参数，支持 headless、交互式、模型覆盖、权限绕过等多种模式
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         prog="foxcode",
@@ -235,6 +242,7 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
+# NOTE:打印欢迎面板，展示版本号与常用快捷命令入口
 def print_welcome():
     title = Panel.fit(
         f"[bold cyan]FoxCode Cli[/bold cyan] v{__version__}\n"
@@ -258,6 +266,7 @@ def print_welcome():
     console.print(title)
 
 
+# NOTE:打印帮助表格，列出所有内置斜杠命令及其说明
 def print_help():
     table = Table(title="可用命令", box=box.SIMPLE)
     table.add_column("命令", style="yellow")
@@ -291,6 +300,7 @@ def print_help():
     console.print(table)
 
 
+# NOTE:将用户提示中的 @filename 引用替换为文件实际内容（仅展示前 60 行防刷屏）
 def _expand_file_refs(prompt: str, workspace_dir: Path) -> str:
     """将 prompt 中的 @filename 替换为文件内容。
 
@@ -321,6 +331,7 @@ def _expand_file_refs(prompt: str, workspace_dir: Path) -> str:
     return re.sub(pattern, _read_file, prompt)
 
 
+# NOTE:解析用户提示中的 Markdown 图片语法，转为 pydantic-ai ImageUrl 供多模态模型使用
 def _parse_image_refs(prompt: str, workspace_dir: Path) -> str | list:
     """解析 prompt 中的 Markdown 图片语法 ![alt](path)，提取为 ImageUrl。
 
@@ -377,6 +388,7 @@ def _parse_image_refs(prompt: str, workspace_dir: Path) -> str | list:
     return parts
 
 
+# NOTE:交互模式入口检测未提交 git 变更并自动提示（当前已弃用但保留以备恢复）
 def _show_git_status_hint(workspace_dir: Path):
     """如果有未提交的变更，自动提示。"""
     try:
@@ -409,6 +421,7 @@ def _show_git_status_hint(workspace_dir: Path):
         pass
 
 
+# NOTE:从 AI 响应中提取 <thinking> 标签内容，分离思考过程与正式回答
 def _extract_thinking(text: str) -> tuple[str, str]:
     """从文本中提取 <thinking>...</thinking> 标签内容。"""
     import re
@@ -423,6 +436,7 @@ def _extract_thinking(text: str) -> tuple[str, str]:
     return thinking, cleaned
 
 
+# NOTE:格式化并打印 AI 返回的 ActionPlan（思考过程、解释文本、修改文件、代码片段）
 def print_action_plan(plan: ActionPlan, skip_explanation: bool = False):
     console.print()
     if not skip_explanation:
@@ -464,6 +478,7 @@ def print_action_plan(plan: ActionPlan, skip_explanation: bool = False):
     console.print()
 
 
+# NOTE:展示本轮修改文件的 git diff --stat 摘要，避免全仓库扫描
 async def _show_colored_diff(workspace_dir: Path, files: list[str]):
     """展示有修改的文件的 diff 摘要。"""
     if not files:
@@ -482,20 +497,24 @@ async def _show_colored_diff(workspace_dir: Path, files: list[str]):
         console.print(f"  [dim]变更摘要:\n{stat}[/dim]")
 
 
+# NOTE:快捷撤销最近 n 步操作并打印结果
 def run_undo(deps: WorkspaceDeps, steps: int = 1):
     result = deps.undo_manager.undo(deps.workspace_dir, steps)
     console.print(f"[yellow]撤销结果:[/yellow]\n{result}")
 
 
+# NOTE:展示撤销管理器中的最近操作历史
 def show_history(deps: WorkspaceDeps):
     result = deps.undo_manager.history_summary()
     console.print(f"[cyan]{result}[/cyan]")
 
 
+# NOTE:字符串命令入口，底层转接为参数列表形式并启用 shell 解析
 async def _exec_shell(command: str, cwd: Path, timeout: int = 120) -> str:
     return await _exec_shell_args(command, cwd, timeout, shell=True)
 
 
+# NOTE:底层命令执行器：优先使用参数列表（shell=False）防止注入，超时后返回错误文本
 async def _exec_shell_args(
     args: list[str] | str, cwd: Path, timeout: int = 120, shell: bool = False
 ) -> str:
@@ -526,6 +545,7 @@ async def _exec_shell_args(
         return f"错误: 命令执行失败 - {e}"
 
 
+# NOTE:调用独立 API 请求为暂存区变更生成符合 Conventional Commits 规范的提交信息
 async def _generate_commit_message(
     http_client: httpx.AsyncClient, config: dict, diff: str
 ) -> str:
@@ -566,6 +586,7 @@ async def _generate_commit_message(
         return ""
 
 
+# NOTE:根据环境变量与配置构建 httpx 代理挂载映射（http/https/no_proxy）
 def _build_proxy_mounts(config: dict) -> dict:
     proxy_mounts = {}
     if config["no_proxy"]:
@@ -587,6 +608,7 @@ def _build_proxy_mounts(config: dict) -> dict:
     return proxy_mounts
 
 
+# NOTE:初始化会话所需的全部管理器：权限、Skills、子代理、MCP（项目配置设​​置覆盖）
 def _build_managers(config: dict):
     """构建权限、skills、子代理、MCP 等运行时组件。"""
     from .skills import SkillsManager
@@ -624,6 +646,7 @@ def _build_managers(config: dict):
     return config, project_config, perms, skills_mgr, subagents_mgr, mcp_toolsets
 
 
+# NOTE:提取 Skills 与子代理列表，用于注入系统提示的可用资源段
 def _agent_lists(skills_mgr, subagents_mgr):
     skills_list = [(s.name, s.description) for s in skills_mgr.list()]
     subagent_list = [
@@ -632,6 +655,7 @@ def _agent_lists(skills_mgr, subagents_mgr):
     return skills_list, subagent_list
 
 
+# NOTE:通过 OpenAI 兼容接口拉取 /v1/models 列表，失败时友好提示并返回空列表
 async def _fetch_model_list(base_url: str, api_key: str) -> list[str]:
     """通过 /v1/models 获取可用模型名称列表。"""
     url = base_url.rstrip("/") + "/models"
@@ -647,6 +671,7 @@ async def _fetch_model_list(base_url: str, api_key: str) -> list[str]:
         return []
 
 
+# NOTE:交互式模型选择：展示可用列表，支持序号或名称输入，回车保留默认值
 async def _select_model_interactive(
     base_url: str, api_key: str, current: str = ""
 ) -> str:
@@ -676,6 +701,7 @@ async def _select_model_interactive(
     return choice
 
 
+# NOTE:非流式运行 agent 并实时输出 AI 在工具调用间隙的旁白/思考文本，便于用户观察 AI 思路
 async def _run_with_narration(
     agent,
     prompt: str | Sequence[Any] | None,
@@ -748,6 +774,9 @@ async def _run_with_narration(
     return all_messages, plan, usage
 
 
+# NOTE:分类打印 AI 运行时错误（API 格式错误、HTTP 错误、超时、连接中断等），可继续时返回 True
+# NOTE:区分各类 API/网络错误并给出友好提示，返回 True 表示会话可继续而非直接崩溃
+# NOTE:错误分类处理器：区分临时性 API 抖动与致命错误，尽量保持交互会话不中断
 def _print_run_error(e: Exception) -> bool:
     """打印 AI 运行错误，返回 True 表示会话可继续。
 
@@ -813,6 +842,7 @@ def _print_run_error(e: Exception) -> bool:
     return True
 
 
+# NOTE:包装单次 agent 运行的状态循环：启动 spinner 更新器、处理审批暂停、收集结果
 async def _run_status_loop(
     agent,
     prompt: str | Sequence[Any] | None,
@@ -857,6 +887,7 @@ async def _run_status_loop(
     return all_messages, plan
 
 
+# NOTE:Goal 模式持久化协议提示：指导 AI 在上下文可能被压缩时通过 goal.md/plan.md/todo.md 保持进度
 GOAL_PERSIST_INSTRUCTION = """You are in /goal mode. Context may be auto-compressed, so to keep working without losing progress, strictly follow this persistence protocol:
 
 1. Maintain three persistent files in the workspace root (create them if missing; read then update if they exist):
@@ -873,6 +904,7 @@ GOAL_PERSIST_INSTRUCTION = """You are in /goal mode. Context may be auto-compres
 Do not overthink this: just keep the files accurate and move on."""
 
 
+# NOTE:Goal 检查点：将 goal.md/plan.md/todo.md 自动提交到 git，便于断点续作
 async def _track_goal_files(workspace_dir: Path, iteration: int) -> str:
     """将 goal 持久化文件 (goal.md/plan.md/todo.md) 提交到 git 作为进度检查点。
 
@@ -909,6 +941,8 @@ async def _track_goal_files(workspace_dir: Path, iteration: int) -> str:
     return result
 
 
+# NOTE:解析 .foxcode/foxcode.md：若含 [Command] 头则作为启动命令列表，否则作为默认提示
+# NOTE:加载用户自定义的默认启动文件，支持命令列表或默认提示两种模式
 def _parse_foxcode_md(workspace_dir: Path) -> tuple[str | None, list[str]]:
     """解析 .foxcode/foxcode.md。
 
@@ -935,6 +969,7 @@ def _parse_foxcode_md(workspace_dir: Path) -> tuple[str | None, list[str]]:
     return raw, []
 
 
+# NOTE:Goal 模式主循环：执行 → 验收 → 反馈迭代，支持上下文压缩与 git 检查点
 async def _run_goal_loop(
     agent,
     goal: str,
@@ -1075,6 +1110,7 @@ async def _run_goal_loop(
     return all_messages
 
 
+# NOTE:退出时自动保存当前会话来避免数据丢失
 def _save_session(session_manager, all_messages: list):
     if all_messages:
         name = session_manager.get_auto_save_name()
@@ -1082,6 +1118,7 @@ def _save_session(session_manager, all_messages: list):
         console.print(f"[dim]会话已自动保存: {name}[/dim]")
 
 
+# NOTE:headless 模式：单次执行给定提示后退出，支持 JSON/text 两种输出格式
 async def _run_headless(
     config: dict,
     perms: PermissionManager,
@@ -1203,6 +1240,7 @@ async def _run_headless(
             console.print(Markdown(plan.explanation))
 
 
+# NOTE:交互模式主入口：构建 Agent、初始化会话、启动命令读取与处理主循环
 async def _run_interactive(config: dict, args):
     from .models import WorkspaceDeps, UndoManager
     from .agent import create_agent
@@ -1946,6 +1984,7 @@ async def _run_interactive(config: dict, args):
             await _run_loop()
 
 
+# NOTE:异步主入口：解析参数、加载配置、区分 headless 与交互模式并分发执行
 async def main_async():
     args = parse_args()
     if args.version:
@@ -2011,6 +2050,7 @@ async def main_async():
     await _run_interactive(config, args)
 
 
+# NOTE:程序入口：捕获 Ctrl+C 优雅退出
 def main():
     try:
         asyncio.run(main_async())

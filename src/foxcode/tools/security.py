@@ -1,6 +1,7 @@
 import re
 from typing import Optional
 
+# NOTE:内置安全规则库：针对代码与 shell 命令的敏感模式检测
 SECURITY_PATTERNS: list[dict] = [
     {
         "id": "command-injection",
@@ -99,10 +100,11 @@ SECURITY_PATTERNS: list[dict] = [
     },
 ]
 
+# NOTE:按上下文类型分离代码安全规则与 shell 安全规则
 SHELL_PATTERNS = [p for p in SECURITY_PATTERNS if p["context"] == "shell"]
 CODE_PATTERNS = [p for p in SECURITY_PATTERNS if p["context"] == "code"]
 
-# 预编译所有正则，避免每次安全检查时重新编译
+# NOTE:预编译所有安全正则，避免每次检查重复编译开销
 _COMPILED_SHELL = [
     {
         **p,
@@ -119,6 +121,7 @@ _COMPILED_CODE = [
 ]
 
 
+# NOTE:扫描文件内容中的安全风险（命令注入、反序列化、硬编码密钥等）
 def check_content_security(content: str) -> list[dict]:
     findings = []
     for pattern in _COMPILED_CODE:
@@ -140,6 +143,7 @@ def check_content_security(content: str) -> list[dict]:
     return findings
 
 
+# NOTE:扫描 shell 命令中的高危模式（递归删除根目录、格式化磁盘等）
 def check_shell_security(command: str) -> list[dict]:
     findings = []
     for pattern in _COMPILED_SHELL:
@@ -160,6 +164,7 @@ def check_shell_security(command: str) -> list[dict]:
     return findings
 
 
+# NOTE:将安全扫描结果格式化为带颜色与 severity 的 rich 文本警告
 def format_security_warnings(findings: list[dict]) -> Optional[str]:
     if not findings:
         return None

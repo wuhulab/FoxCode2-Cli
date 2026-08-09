@@ -8,6 +8,7 @@ from ..models import WorkspaceDeps
 from . import log_tool, permission_validator
 
 
+# NOTE:去除 HTML 标签、脚本/样式块与实体编码，仅保留可读文本
 def _clean_html(text: str) -> str:
     """简单清理 HTML 标签和实体。"""
     text = re.sub(
@@ -20,6 +21,7 @@ def _clean_html(text: str) -> str:
     return "\n".join(lines)
 
 
+# NOTE:SSRF 防护：禁止访问内网、保留与云元数据 IP 段，防止服务器端请求伪造
 # 内网 / 保留 / 链路本地 / 云元数据地址段（SSRF 防护）
 _PRIVATE_NETS = [
     ipaddress.ip_network("0.0.0.0/8"),
@@ -41,6 +43,7 @@ _PRIVATE_NETS = [
     ipaddress.ip_network("::ffff:0:0/96"),
 ]
 
+# NOTE:内部主机名后缀黑名单：这些域名通常只解析到内网服务
 # 内部主机名后缀：这些域名只可能指向内网服务
 _INTERNAL_HOSTNAME_SUFFIXES = (
     ".local",
@@ -54,6 +57,7 @@ _INTERNAL_HOSTNAME_SUFFIXES = (
 )
 
 
+# NOTE:判断 IP 是否落入内网/保留地址段（回环除外，预览服务器使用 127.0.0.1）
 def _ip_is_private(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     """判断 IP 是否属于内网/保留地址段（回环地址除外，预览服务器使用 127.0.0.1）。"""
     for net in _PRIVATE_NETS:
@@ -62,6 +66,7 @@ def _ip_is_private(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return False
 
 
+# NOTE:逐层校验 URL 安全：协议白名单、内网 IP、DNS 解析、重定向链（防 SSRF）
 def _validate_fetch_url(url: str) -> str | None:
     """校验 URL 是否安全。返回错误消息字符串或 None（安全）。"""
     try:
@@ -100,6 +105,7 @@ def _validate_fetch_url(url: str) -> str | None:
     return None
 
 
+# NOTE:注册 URL 抓取工具：带 SSRF 防护、手动跟随跳转、HTML 清洗与长度截断
 def register(agent):
     @agent.tool(args_validator=permission_validator("fetch_url"))
     async def fetch_url(

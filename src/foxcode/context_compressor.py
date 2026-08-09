@@ -6,12 +6,14 @@ from typing import Any
 import httpx
 
 
+# NOTE:上下文压缩策略参数：保留首尾消息数、触发阈值、摘要长度上限
 KEEP_FIRST_MESSAGES = 3  # 保留最开始的 N 条完整消息
 KEEP_LAST_MESSAGES = 15  # 保留最近的 N 条完整消息
 COMPRESS_THRESHOLD = 35  # 超过此数量时触发压缩
 SUMMARY_MAX_TOKENS = 500
 
 
+# NOTE:从 pydantic-ai 各类消息对象中提取可读的文本内容用于摘要
 def _extract_text(msg: Any) -> str:
     """从 pydantic-ai 消息对象中提取文本内容。"""
     role = "unknown"
@@ -46,6 +48,7 @@ def _extract_text(msg: Any) -> str:
     return f"[{role}]\n" + "\n".join(parts_text)
 
 
+# NOTE:按字符数/4 粗略估算消息列表的 token 数，用于判断是否超过上下文阈值
 def estimate_message_tokens(messages: list[Any]) -> int:
     """粗略估算消息列表的总 token 数（按字符数 /4 估算）。
 
@@ -57,6 +60,7 @@ def estimate_message_tokens(messages: list[Any]) -> int:
     return total_chars // 4
 
 
+# NOTE:增量 token 估算器：仅对新追加消息做序列化，避免压缩后全量重算
 @dataclass
 class TokenEstimator:
     """增量 token 估算器：只对新追加的消息做序列化，避免每轮全量重算。
@@ -79,6 +83,7 @@ class TokenEstimator:
         return self._char_count // 4
 
 
+# NOTE:对长对话历史进行压缩：保留首尾消息，中间部分通过 API 生成摘要替换
 async def compress_messages(
     messages: list[Any],
     http_client: httpx.AsyncClient,

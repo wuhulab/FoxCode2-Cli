@@ -19,6 +19,7 @@ from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
 from . import log_tool, permission_validator
 
+# NOTE:支持索引的源代码文件后缀集合（覆盖常见前后端语言）
 SOURCE_EXTS = frozenset(
     {
         ".py",
@@ -39,6 +40,7 @@ SOURCE_EXTS = frozenset(
 )
 
 
+# NOTE:代码符号数据类：记录名称、类型、位置、签名与文档等信息
 @dataclass
 class Symbol:
     name: str
@@ -51,6 +53,7 @@ class Symbol:
     docstring: str = ""
 
 
+# NOTE:代码库索引核心类：维护符号列表，通过文件 mtime 判断索引是否过期
 @dataclass
 class CodeIndex:
     workspace_dir: Path
@@ -58,6 +61,7 @@ class CodeIndex:
     _file_mtime: dict[str, float] = field(default_factory=dict)
     _last_check: float = 0.0
 
+    # NOTE:基于文件修改时间判断索引是否过时（带 2 秒节流防止高频扫描）
     def is_stale(self) -> bool:
         """检查索引是否需要更新（基于文件修改时间），带节流防止高频重复扫描。"""
         now = time.monotonic()
@@ -86,6 +90,7 @@ class CodeIndex:
                 continue
             yield f
 
+    # NOTE:构建代码库索引：先尝试 ctags（多语言），失败则回退到 Python AST
     async def build(self) -> str:
         """构建索引，返回状态信息。"""
         self.symbols.clear()
@@ -99,6 +104,7 @@ class CodeIndex:
         # 回退到 AST
         return await asyncio.to_thread(self._build_ast_index)
 
+    # NOTE:尝试使用 universal-ctags 生成 JSON 格式索引，覆盖多语言符号
     async def _try_ctags(self) -> Optional[str]:
         """尝试使用 universal-ctags 生成索引。"""
         try:
@@ -189,6 +195,7 @@ class CodeIndex:
         except Exception:
             return None
 
+    # NOTE:ctags 不可用时回退：使用 Python AST 遍历提取类、方法与函数符号
     def _build_ast_index(self) -> str:
         """使用 Python AST 构建索引（仅 Python 项目）。"""
         count = 0
@@ -296,6 +303,7 @@ class CodeIndex:
             return f"({', '.join(bases)})"
         return ""
 
+    # NOTE:基于名称/文件/父级关键字对符号列表做简单包含匹配搜索
     def search(self, query: str, kind: str = "", limit: int = 30) -> list[Symbol]:
         """搜索符号。"""
         query_lower = query.lower()
@@ -311,6 +319,7 @@ class CodeIndex:
                 results.append(sym)
         return results[:limit]
 
+    # NOTE:根据符号名定位其定义文件并提取周围代码上下文
     def get_context(
         self, name: str, max_lines: int = 30
     ) -> Optional[tuple[Symbol, str]]:
@@ -331,10 +340,11 @@ class CodeIndex:
         return None
 
 
-# 全局索引缓存
+# NOTE:全局索引缓存：避免同一工作区重复构建符号索引
 _index_cache: dict[str, CodeIndex] = {}
 
 
+# NOTE:获取（或创建）指定工作区的代码索引缓存实例
 def _get_index(workspace_dir: Path) -> CodeIndex:
     key = str(workspace_dir)
     if key not in _index_cache:
@@ -342,6 +352,7 @@ def _get_index(workspace_dir: Path) -> CodeIndex:
     return _index_cache[key]
 
 
+# NOTE:注册代码索引工具：构建索引、搜索符号、获取符号上下文
 def register(agent):
     @agent.tool(args_validator=permission_validator("index_codebase"))
     async def index_codebase(ctx: RunContext[WorkspaceDeps]) -> str:

@@ -9,11 +9,14 @@ from . import log_tool, permission_validator
 from .file_ops import _resolve_safe_path
 
 
+# NOTE:预览服务器全局进程与端口引用（单实例管理）
 _preview_process: subprocess.Popen | None = None
 _preview_port: int = 0
 
 
+# NOTE:注册 Web 预览工具：启动/停止本地 http.server 供 AI 抓取验证页面
 def register(agent):
+    # NOTE:启动绑定 127.0.0.1 的本地 HTTP 服务器，自动终止已有实例
     @agent.tool(args_validator=permission_validator("start_preview"))
     async def start_preview(
         ctx: RunContext[WorkspaceDeps],
@@ -72,6 +75,7 @@ def register(agent):
         except Exception as e:
             return f"错误: 启动预览服务器失败 - {e}"
 
+    # NOTE:终止当前运行的预览服务器进程并释放端口
     @agent.tool(args_validator=permission_validator("stop_preview"))
     async def stop_preview(ctx: RunContext[WorkspaceDeps]) -> str:
         """停止当前运行的预览服务器。"""

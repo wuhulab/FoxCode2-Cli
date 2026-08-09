@@ -4,6 +4,7 @@ from ..models import WorkspaceDeps
 from . import log_tool, permission_validator, run_subprocess
 
 
+# NOTE:通过检查配置文件与测试文件命名模式自动推断项目使用的测试框架
 def _detect_test_framework(workspace_dir: Path) -> str | None:
     """自动检测测试框架。"""
     if (workspace_dir / "pytest.ini").exists() or (
@@ -29,6 +30,7 @@ def _detect_test_framework(workspace_dir: Path) -> str | None:
     return None
 
 
+# NOTE:在子进程中运行测试命令，捕获 stdout/stderr 并返回输出与退出码
 async def _run_command(
     cwd: Path, cmd: list[str], timeout: int = 120
 ) -> tuple[str, int]:
@@ -54,6 +56,7 @@ async def _run_command(
         return f"错误: 测试执行失败 - {e}", -1
 
 
+# NOTE:注册测试运行工具：自动检测框架并适配对应命令，支持路径与额外参数
 def register(agent):
     @agent.tool(args_validator=permission_validator("run_tests"))
     async def run_tests(

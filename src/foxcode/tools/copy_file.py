@@ -4,6 +4,7 @@ from . import log_tool, permission_validator
 from .file_ops import _resolve_safe_path, check_protected_write
 
 
+# NOTE:复制文件或目录到工作区内新位置，支持撤销记录（撤销时删除目标）
 def register(agent):
     @agent.tool(args_validator=permission_validator("copy_file"))
     async def copy_file(

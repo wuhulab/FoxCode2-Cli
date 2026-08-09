@@ -4,6 +4,7 @@ from ..models import WorkspaceDeps
 from . import log_tool, permission_validator
 
 
+# NOTE:注册计划模式切换工具：限制 AI 只能使用只读工具探索并出方案
 def register(agent):
     @agent.tool(args_validator=permission_validator("enter_plan_mode"))
     async def enter_plan_mode(ctx: RunContext[WorkspaceDeps]) -> str:

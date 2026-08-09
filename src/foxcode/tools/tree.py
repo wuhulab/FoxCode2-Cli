@@ -4,6 +4,7 @@ from ..models import WorkspaceDeps
 from . import log_tool, permission_validator
 
 
+# NOTE:递归构建 ASCII 目录树，支持深度限制、排除模式、隐藏文件开关
 def _build_tree(
     directory: Path,
     workspace_dir: Path,
@@ -81,6 +82,7 @@ def _build_tree(
     return lines
 
 
+# NOTE:注册目录树展示工具：生成类 tree 命令的层级结构可视化
 def register(agent):
     @agent.tool(args_validator=permission_validator("tree"))
     async def tree(

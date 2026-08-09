@@ -4,6 +4,7 @@ from ..models import WorkspaceDeps
 from . import log_tool, permission_validator, run_subprocess
 
 
+# NOTE:执行 git 命令的通用包装：参数列表形式避免 shell 注入，返回 stdout/stderr 文本
 async def _run_git(cwd: Path, *args: str, timeout: int = 30) -> str:
     try:
         result = await run_subprocess(
@@ -29,6 +30,7 @@ async def _run_git(cwd: Path, *args: str, timeout: int = 30) -> str:
         return f"错误: git 命令执行失败 - {e}"
 
 
+# NOTE:注册 Git 操作工具集：status/diff/log/add/commit/branch/checkout
 def register(agent):
     @agent.tool(args_validator=permission_validator("git_status"))
     async def git_status(ctx: RunContext[WorkspaceDeps]) -> str:

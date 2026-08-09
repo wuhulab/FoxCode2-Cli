@@ -9,11 +9,14 @@ from rich.console import Console
 from pydantic_ai.exceptions import ToolFailed
 from pydantic_ai.mcp import MCPToolset, StdioTransport
 
+# NOTE:用于 MCP 配置错误输出的 rich 控制台实例
 console = Console()
 
+# NOTE:支持 ${VAR} 与 ${VAR:-default} 语法的 env 变量正则
 _ENV_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 
 
+# NOTE:递归展开配置中的环境变量占位符（支持 dict/list/str 嵌套）
 def _expand_env(value):
     if isinstance(value, dict):
         return {k: _expand_env(v) for k, v in value.items()}
@@ -34,6 +37,7 @@ def _expand_env(value):
     return value
 
 
+# NOTE:从工作区 .foxcode/mcp.json 或 .mcp.json 发现 MCP 服务器配置
 def discover_mcp_configs(workspace_dir: Path) -> dict[str, Any]:
     """从 .foxcode/mcp.json 或 .mcp.json 读取 mcpServers 配置。"""
     servers: dict[str, Any] = {}
@@ -54,6 +58,7 @@ def discover_mcp_configs(workspace_dir: Path) -> dict[str, Any]:
     return servers
 
 
+# NOTE:根据配置初始化 MCP toolsets，并为每个远程工具调用附加本地权限门控
 def load_mcp_toolsets(workspace_dir: Path, permissions) -> list[MCPToolset]:
     """根据配置创建 MCP toolsets，并为每个工具调用加上权限门控。"""
     servers = discover_mcp_configs(workspace_dir)
@@ -76,10 +81,13 @@ def load_mcp_toolsets(workspace_dir: Path, permissions) -> list[MCPToolset]:
                     target = (
                         f"{tool_name} args={json.dumps(args, ensure_ascii=False)[:500]}"
                     )
-                    err = permissions.check(f"mcp__{server_name}", (), {"command": target})
+                    err = permissions.check(
+                        f"mcp__{server_name}", (), {"command": target}
+                    )
                     if err:
                         raise ToolFailed(err)
                 return await call_tool(tool_name, args)
+
             return _process
 
         _process = _make_process(name)

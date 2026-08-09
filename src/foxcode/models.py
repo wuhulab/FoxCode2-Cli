@@ -7,6 +7,7 @@ import httpx
 from rich.console import Console
 
 
+# NOTE:各主流模型的输入/输出单价（每百万 token），用于估算会话费用
 MODEL_PRICING: dict[str, tuple[float, float]] = {
     "gpt-4o": (2.50, 10.00),
     "gpt-4o-mini": (0.15, 0.60),
@@ -24,6 +25,7 @@ MODEL_PRICING: dict[str, tuple[float, float]] = {
 }
 
 
+# NOTE:根据模型名称模糊匹配单价，计算本次调用的估算费用（美元）
 def estimate_cost(
     model_name: str, input_tokens: int, output_tokens: int
 ) -> Optional[float]:
@@ -36,6 +38,7 @@ def estimate_cost(
     return None
 
 
+# NOTE:工具调用时的中文状态名，用于控制台旋转提示展示
 STATUS_NAMES = {
     "read_file": "读取中",
     "create_file": "创建中",
@@ -84,6 +87,7 @@ STATUS_NAMES = {
     "update_memory": "更新记忆中",
 }
 
+# NOTE:工具调用统计的双语标签（中文用于展示，英文用于日志）
 COUNT_LABELS = {
     "read_file": ("读取", "read"),
     "write_file": ("编辑", "edit"),
@@ -133,6 +137,7 @@ COUNT_LABELS = {
 }
 
 
+# NOTE:AI 结构化输出模型：包含解释文本、修改文件列表、代码片段与操作详情
 class ActionPlan(BaseModel):
     explanation: str
     files_modified: list[str] = []
@@ -140,6 +145,7 @@ class ActionPlan(BaseModel):
     operations_detail: list[str] = []
 
 
+# NOTE:单次可撤销操作记录（含组合操作组标签，支持批量回滚）
 @dataclass
 class UndoEntry:
     operation: str
@@ -148,6 +154,7 @@ class UndoEntry:
     group_tag: Optional[str] = None
 
 
+# NOTE:撤销管理器：维护操作历史栈，支持单条与组合操作回滚
 class UndoManager:
     def __init__(self):
         self._history: list[UndoEntry] = []
@@ -170,14 +177,17 @@ class UndoManager:
             )
         )
 
+    # NOTE:开启组合操作组，后续 record 自动带上相同 group_tag 实现批量回滚
     def start_group(self, tag: str):
         """开始一个组合操作组，后续 record 的 entry 会带上相同的 group_tag。"""
         self._active_group = tag
 
+    # NOTE:关闭组合操作组，结束批量记录
     def end_group(self):
         """结束组合操作组。"""
         self._active_group = None
 
+    # NOTE:撤销最近 n 步（含组合操作），按栈顺序弹出并恢复原内容
     def undo(self, workspace_dir: Path, n: int = 1) -> str:
         if not self._history:
             return "没有可撤销的操作"
@@ -188,7 +198,7 @@ class UndoManager:
             entry = self._history.pop()
             full_path = workspace_dir / entry.file_path
 
-            # 如果这是组合操作的一部分，回滚整个组
+            # NOTE:若发现组合操作标记，一次性回滚整个组内所有条目
             if entry.group_tag and entry.group_tag not in undone_groups:
                 group_tag = entry.group_tag
                 undone_groups.add(group_tag)
@@ -239,7 +249,7 @@ class UndoManager:
                 count += 1
                 continue
 
-            # 普通单条撤销
+            # NOTE:普通单条撤销，按操作类型恢复文件状态
             try:
                 if entry.operation == "create":
                     if full_path.exists():
@@ -302,6 +312,7 @@ class UndoManager:
         return "\n".join(lines)
 
 
+# NOTE:工具调用追踪器：统计各工具调用次数、token 估算、费用累积，用于状态栏与用量报告
 @dataclass
 class ToolTracker:
     _counts: Counter = field(default_factory=Counter)
@@ -316,21 +327,25 @@ class ToolTracker:
     status: Any = None
     _summary_cache: str | None = None
 
+    # NOTE:重置本轮计数（保留累积 token 与费用）
     def reset(self):
         self._counts.clear()
         self._current_tool = ""
         self._total_chars = 0
         self._summary_cache = None
 
+    # NOTE:记录一次工具调用及其输出字符量（触发缓存失效）
     def count(self, tool_name: str, chars: int = 0):
         self._counts[tool_name] += 1
         self._current_tool = tool_name
         self._total_chars += chars
         self._summary_cache = None
 
+    # NOTE:累加字符量（用于大文件读取时的 token 估算）
     def add_chars(self, n: int):
         self._total_chars += n
 
+    # NOTE:记录实际 API 输入/输出 token，并累加估算费用
     def record_usage(self, input_tokens: int, output_tokens: int, model_name: str = ""):
         self.cumulative_input_tokens += input_tokens
         self.cumulative_output_tokens += output_tokens
@@ -347,13 +362,16 @@ class ToolTracker:
     def total(self) -> int:
         return sum(self._counts.values())
 
+    # NOTE:基于字符数粗略估算 token（按 4 字符 ≈ 1 token）
     @property
     def estimated_tokens(self) -> int:
         return self._total_chars // 4
 
+    # NOTE:返回各工具调用次数字典
     def summary(self) -> dict[str, int]:
         return dict(self._counts)
 
+    # NOTE:生成人类可读的工具调用摘要，带缓存避免重复拼接
     def summary_str(self, lang: str = "zh") -> str:
         if self._summary_cache is not None:
             return self._summary_cache
@@ -367,6 +385,7 @@ class ToolTracker:
         self._summary_cache = "，".join(parts) if parts else ""
         return self._summary_cache
 
+    # NOTE:构建当前状态栏文本（spinner + 当前工具 + 已用摘要 + token 预警）
     def status_line(self, spinner: str, lang: str = "zh") -> str:
         status = STATUS_NAMES.get(self._current_tool, "")
         summary = self.summary_str(lang)
@@ -385,6 +404,7 @@ class ToolTracker:
 
         return "  ".join(parts) + " Thinking..."
 
+    # NOTE:返回累积用量字符串（请求数、输入/输出 token、估算费用）
     def usage_summary(self, model_name: str = "") -> str:
         parts = []
         if self.session_requests > 0:
@@ -398,6 +418,7 @@ class ToolTracker:
         return " | ".join(parts) if parts else "暂无使用数据"
 
 
+# NOTE:WorkspaceDeps 承载整个会话的运行时依赖（供 Agent 工具共享访问）
 @dataclass
 class WorkspaceDeps:
     workspace_dir: Path

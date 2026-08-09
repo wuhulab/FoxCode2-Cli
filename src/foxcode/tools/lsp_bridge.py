@@ -17,6 +17,7 @@ from ..models import WorkspaceDeps
 from . import log_tool, permission_validator
 
 
+# NOTE:将相对路径解析为安全路径，并校验必须是 .py 文件
 def _resolve_filepath(workspace_dir: Path, filename: str) -> Path | None:
     from .file_ops import _resolve_safe_path
 
@@ -29,6 +30,7 @@ def _resolve_filepath(workspace_dir: Path, filename: str) -> Path | None:
     return None
 
 
+# NOTE:将(行,列)转换为源码中的绝对字符偏移（供 jedi 定位使用）
 def _rowcol_to_pos(source: str, row: int, col: int) -> int:
     """将行号/列号转换为源码中的字符位置（0-index）。"""
     lines = source.splitlines()
@@ -37,12 +39,14 @@ def _rowcol_to_pos(source: str, row: int, col: int) -> int:
     return min(pos, len(source))
 
 
+# NOTE:延迟检测 jedi 库是否安装，未安装时返回友好提示
 def _jedi_available() -> bool:
     import importlib.util
 
     return importlib.util.find_spec("jedi") is not None
 
 
+# NOTE:格式化 jedi 返回的定义列表为易读文本（含签名、类型、文档摘要）
 def _format_definition(defs: list) -> str:
     """格式化 jedi 定义结果。"""
     if not defs:
@@ -71,6 +75,7 @@ def _format_definition(defs: list) -> str:
     return "\n".join(lines)
 
 
+# NOTE:格式化 jedi 引用列表为项目相对路径的列表文本（最多 30 条）
 def _format_references(refs: list) -> str:
     if not refs:
         return "未找到引用"
@@ -88,6 +93,7 @@ def _format_references(refs: list) -> str:
     return f"找到 {len(refs)} 处引用:\n" + "\n".join(lines[:30])
 
 
+# NOTE:注册基于 jedi 的 LSP 桥接工具：跳转定义、查找引用、类型推断、文档查询
 def register(agent):
     @agent.tool(args_validator=permission_validator("go_to_definition"))
     async def go_to_definition(

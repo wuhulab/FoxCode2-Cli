@@ -7,9 +7,11 @@ from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
 from . import log_tool, permission_validator
 
+# NOTE:AI 可写记忆文件路径（普通文件写工具被拦截，只能通过本工具修改）
 MEMORY_FILENAME = ".foxcode/Memory.md"
 
 
+# NOTE:返回规范化的相对路径字符串，用于撤销记录与权限判断
 def _memory_path(workspace_dir) -> str:
     """返回规范化的相对路径（用于撤销记录与权限判断）。"""
     norm = MEMORY_FILENAME.replace("\\", "/")
@@ -18,6 +20,7 @@ def _memory_path(workspace_dir) -> str:
     return norm
 
 
+# NOTE:注册记忆更新工具：AI 维护项目知识，普通文件写工具无法绕过
 def register(agent):
     @agent.tool(args_validator=permission_validator("update_memory"))
     async def update_memory(ctx: RunContext[WorkspaceDeps], content: str) -> str:

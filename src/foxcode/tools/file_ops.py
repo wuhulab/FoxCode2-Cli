@@ -9,16 +9,17 @@ from ..models import WorkspaceDeps
 from . import log_tool, permission_validator
 from .security import check_content_security, format_security_warnings
 
-# 缓存已解析的工作区路径（同一 workspace 的多次文件操作无需重复 resolve）
+# NOTE:缓存已解析的工作区路径（同一 workspace 的多次文件操作无需重复 resolve）
 _workspace_norm_cache: dict[str, str] = {}
 
-# 受保护文件（规范化相对路径）：AI 不可通过普通文件工具修改
+# NOTE:受保护文件清单：AI 不可通过普通文件工具直接修改（Rules.md 只读、Memory.md 需专用工具）
 PROTECTED_WRITE = {
     ".foxcode/rules.md",
     ".foxcode/memory.md",
 }
 
 
+# NOTE:检查文件路径是否落入受保护清单，返回拦截原因；None 表示允许写入
 def check_protected_write(filename: str) -> str | None:
     """检查 filename 是否落入受保护文件，返回拒绝原因（None 表示可写）。
 
@@ -38,6 +39,7 @@ def check_protected_write(filename: str) -> str | None:
     return None
 
 
+# NOTE:路径安全解析：将用户传入的相对路径限制在工作区内，防止目录遍历攻击
 def _resolve_safe_path(workspace_dir: Path, filename: str) -> Path:
     resolved = (workspace_dir / filename).resolve()
     ws_key = str(workspace_dir)
@@ -56,6 +58,7 @@ def _resolve_safe_path(workspace_dir: Path, filename: str) -> Path:
     return resolved
 
 
+# NOTE:读取文件指定行范围，返回 (起始行, 结束行, 总行数, 选中内容)；end_line=0 表示读到末尾
 def _read_file_range(
     filepath: Path, start_line: int, end_line: int
 ) -> tuple[int, int, int, str]:
@@ -80,6 +83,7 @@ def _read_file_range(
     return start_line, end_line, total, "".join(selected)
 
 
+# NOTE:安全扫描：检测写入内容中是否包含密钥泄露等敏感信息，若发现则打印警告
 def _warn_security(ctx: RunContext[WorkspaceDeps], content: str):
     findings = check_content_security(content)
     warning = format_security_warnings(findings)
@@ -87,7 +91,9 @@ def _warn_security(ctx: RunContext[WorkspaceDeps], content: str):
         ctx.deps.console.print(warning)
 
 
+# NOTE:注册全部文件操作工具：读、写范围读、创建、编辑、覆盖、追加、删除、重命名、列出
 def register(agent):
+    # NOTE:读取完整文件内容，自动累加字符量供 token 估算
     @agent.tool(args_validator=permission_validator("read_file"))
     async def read_file(ctx: RunContext[WorkspaceDeps], filename: str) -> str:
         log_tool(ctx, "read_file", filename)
@@ -106,6 +112,7 @@ def register(agent):
         except Exception as e:
             return f"错误: 读取文件失败 - {e}"
 
+    # NOTE:读取文件指定行范围，支持多别名入参（兼容大小写与驼峰）
     @agent.tool(args_validator=permission_validator("read_file_range"))
     async def read_file_range(
         ctx: RunContext[WorkspaceDeps],
@@ -140,6 +147,7 @@ def register(agent):
         header = f"[文件 {filename} 第 {start_line}-{end_line} 行 / 共 {total} 行]\n"
         return header + output
 
+    # NOTE:创建新文件（若已存在则报错），写入前先做安全扫描与受保护文件检查
     @agent.tool(args_validator=permission_validator("create_file"))
     async def create_file(
         ctx: RunContext[WorkspaceDeps], filename: str, content: str
@@ -164,6 +172,7 @@ def register(agent):
         except Exception as e:
             return f"错误: 创建文件失败 - {e}"
 
+    # NOTE:基于字符串替换编辑文件（要求唯一匹配），支持多别名入参兼容模型输出差异
     @agent.tool(args_validator=permission_validator("write_file"))
     async def write_file(
         ctx: RunContext[WorkspaceDeps],
@@ -210,6 +219,7 @@ def register(agent):
         ctx.deps.tool_tracker.add_chars(len(new_content))
         return f"已更新 {filename}"
 
+    # NOTE:完整覆盖写入已有文件（非创建），适合 AI 重写整个文件内容
     @agent.tool(args_validator=permission_validator("write_file_complete"))
     async def write_file_complete(
         ctx: RunContext[WorkspaceDeps], filename: str, content: str
@@ -237,6 +247,7 @@ def register(agent):
         ctx.deps.tool_tracker.add_chars(len(content))
         return f"已覆盖写入 {filename}"
 
+    # NOTE:在已有文件末尾追加内容，保留旧内容用于撤销
     @agent.tool(args_validator=permission_validator("append_file"))
     async def append_file(
         ctx: RunContext[WorkspaceDeps], filename: str, content: str
@@ -265,6 +276,7 @@ def register(agent):
         ctx.deps.tool_tracker.add_chars(len(content))
         return f"已追加内容到 {filename}"
 
+    # NOTE:删除文件（先读取内容以备撤销），受保护文件禁止删除
     @agent.tool(args_validator=permission_validator("delete_file"))
     async def delete_file(ctx: RunContext[WorkspaceDeps], filename: str) -> str:
         log_tool(ctx, "delete_file", filename)
@@ -290,6 +302,7 @@ def register(agent):
         ctx.deps.undo_manager.record("delete", filename, old_content=old_content)
         return f"已删除文件 {filename}"
 
+    # NOTE:重命名文件（需检查双方路径均不越权且不受保护），记录旧名用于撤销
     @agent.tool(args_validator=permission_validator("rename_file"))
     async def rename_file(
         ctx: RunContext[WorkspaceDeps],
@@ -329,6 +342,7 @@ def register(agent):
         ctx.deps.undo_manager.record("rename", new_filename, old_content=old_filename)
         return f"已重命名 {old_filename} -> {new_filename}"
 
+    # NOTE:列出目录内容（剪枝跳过重型目录），条目上限 500 防止输出过大
     @agent.tool(args_validator=permission_validator("list_files"))
     async def list_files(ctx: RunContext[WorkspaceDeps], path: str = "") -> str:
         log_tool(ctx, "list_files", path or ".")

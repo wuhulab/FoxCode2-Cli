@@ -12,6 +12,7 @@ from .file_ops import _resolve_safe_path, check_protected_write
 from .security import check_content_security, format_security_warnings
 
 
+# NOTE:在文件内容中滑动窗口模糊匹配 old_string，返回最佳匹配的字节起止位置
 def _fuzzy_find(
     content: str, old_string: str, threshold: float = 0.85
 ) -> Optional[tuple[int, int]]:
@@ -44,6 +45,7 @@ def _fuzzy_find(
     return None
 
 
+# NOTE:先尝试精确字符串替换，失败时回退到模糊匹配替换，返回三元组
 def _apply_fuzzy_replace(
     content: str, old_string: str, new_string: str
 ) -> tuple[str, bool, str]:
@@ -75,6 +77,7 @@ def _apply_fuzzy_replace(
     )
 
 
+# NOTE:编辑字典的键名别名映射，兼容大小写差异与驼峰变体
 _KEY_ALIASES = {
     "filename": ("filename",),
     "old_string": ("old_string", "oldString", "oldcontent"),
@@ -82,6 +85,7 @@ _KEY_ALIASES = {
 }
 
 
+# NOTE:将模型传入的 edit 字典键名统一归一化，防止因大小写差异导致字段丢失
 def _normalize_edit(edit: dict) -> dict:
     """将 edit dict 的键名归一化，容忍模型使用 camelCase 变体。"""
     norm: dict = {}
@@ -96,7 +100,9 @@ def _normalize_edit(edit: dict) -> dict:
     return norm
 
 
+# NOTE:注册批量编辑工具：multi_write_file、apply_diff、batch_create
 def register(agent):
+    # NOTE:原子性批量文件编辑：预验证所有编辑合法后再一次性应用，失败则整体回滚
     @agent.tool(args_validator=permission_validator("multi_write_file"))
     async def multi_write_file(
         ctx: RunContext[WorkspaceDeps],
@@ -221,6 +227,7 @@ def register(agent):
         files = ", ".join(a["filename"] for a in applied)
         return f"已成功原子性编辑 {len(applied)} 个文件: {files}"
 
+    # NOTE:应用 unified diff 格式补丁到对应文件，支持新文件创建与模糊匹配
     @agent.tool(args_validator=permission_validator("apply_diff"))
     async def apply_diff(
         ctx: RunContext[WorkspaceDeps],
@@ -296,6 +303,7 @@ def register(agent):
         files = ", ".join(p["filename"] for p in applied)
         return f"已成功应用 diff 到 {len(applied)} 个文件: {files}"
 
+    # NOTE:原子性批量创建文件：任一文件已存在则全部不创建，失败时自动清理
     @agent.tool(args_validator=permission_validator("batch_create"))
     async def batch_create(
         ctx: RunContext[WorkspaceDeps],
@@ -359,6 +367,7 @@ def register(agent):
         return f"已批量创建 {len(created)} 个文件: {', '.join(created)}"
 
 
+# NOTE:解析 unified diff 文本为结构化 patch 列表（简化版，支持新增文件识别）
 def _parse_unified_diff(diff_text: str) -> list[dict]:
     """解析 unified diff 文本，返回 patch 列表。"""
     patches = []
@@ -402,6 +411,7 @@ def _parse_unified_diff(diff_text: str) -> list[dict]:
     return patches
 
 
+# NOTE:将 patch 应用到原始内容：先尝试连续块模糊匹配，再回退到精确子串匹配
 def _apply_patch(original: str, patch: dict, fuzzy: bool) -> tuple[str, bool, str]:
     """将解析后的 patch 应用到 original 内容。"""
     if patch.get("is_new"):
@@ -449,6 +459,7 @@ def _apply_patch(original: str, patch: dict, fuzzy: bool) -> tuple[str, bool, st
     return original, False, f"无法匹配 patch 内容（最佳匹配度 {best_ratio:.0%}）"
 
 
+# NOTE:回滚已应用的 diff 操作：按逆序恢复文件内容或删除新创建的文件
 def _rollback_diff(applied: list[dict], workspace_dir: Path):
     """回滚已应用的 diff 操作。"""
     for item in reversed(applied):

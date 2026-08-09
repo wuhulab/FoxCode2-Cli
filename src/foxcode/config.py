@@ -3,13 +3,15 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+# NOTE:提前加载 .env 环境变量，供后续配置读取
 load_dotenv()
 
-# 内置免费 API（开箱即用，无需配置密钥）
+# NOTE:内置免费 API 端点（开箱即用，无需用户自行配置密钥）
 BUILTIN_FREE_BASE_URL = "https://fai.shunx.top/v1"
 BUILTIN_FREE_API_KEY = "sk-C4Dy0S5OFKJ7QoPu8erQc2tTDklW2fBIry34CA8tmFcC1tGr"
 
 
+# NOTE:从工作区 .foxcode/ 目录加载项目级配置（指南、规则、记忆、设置、自定义命令）
 def load_project_config(workspace_dir: Path) -> dict:
     foxcode_dir = workspace_dir / ".foxcode"
     config = {
@@ -55,6 +57,7 @@ def load_project_config(workspace_dir: Path) -> dict:
     return config
 
 
+# NOTE:加载 .foxcode/commands/ 目录下的自定义快捷命令（每文件对应一个 /command）
 def load_custom_commands(foxcode_dir: Path) -> dict[str, str]:
     commands = {}
     commands_dir = foxcode_dir / "commands"
@@ -72,6 +75,7 @@ def load_custom_commands(foxcode_dir: Path) -> dict[str, str]:
     return commands
 
 
+# NOTE:将项目级 settings.json 中的参数覆盖到运行时配置（模型、超时、流式输出等）
 def apply_project_settings(config: dict, project_config: dict) -> dict:
     settings = project_config.get("settings", {})
     if not settings:
@@ -97,6 +101,7 @@ def apply_project_settings(config: dict, project_config: dict) -> dict:
     return config
 
 
+# NOTE:从环境变量与 .env 组装全局运行时配置，提供各类默认值兜底
 def load_config():
     try:
         temperature = float(os.getenv("TEMPERATURE", "0.7"))
@@ -120,6 +125,7 @@ def load_config():
 
     stream_output = os.getenv("STREAM_OUTPUT", "false").lower() in ("true", "1", "yes")
 
+    # NOTE:聚合全部配置项，供 cli.py 与 Agent 使用
     return {
         "model": os.getenv("OPENAI_MODEL", ""),
         "base_url": os.getenv("OPENAI_BASE_URL", BUILTIN_FREE_BASE_URL),

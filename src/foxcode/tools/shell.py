@@ -6,7 +6,9 @@ from . import log_tool, permission_validator, run_subprocess
 from .security import check_shell_security, format_security_warnings
 
 
+# NOTE:注册 Shell 命令与脚本文件执行工具，含安全扫描与超时控制
 def register(agent):
+    # NOTE:在子进程中执行任意 shell 命令，限制在工作区内并检查高危模式
     @agent.tool(args_validator=permission_validator("run_shell"))
     async def run_shell(ctx: RunContext[WorkspaceDeps], command: str) -> str:
         cmd_preview = command[:60] + "..." if len(command) > 60 else command
@@ -38,6 +40,7 @@ def register(agent):
         except Exception as e:
             return f"错误: 命令执行失败 - {e}"
 
+    # NOTE:根据文件后缀自动选择解释器并运行脚本文件（支持 py/js/ts/go 等）
     @agent.tool(args_validator=permission_validator("run_file"))
     async def run_file(ctx: RunContext[WorkspaceDeps], filename: str) -> str:
         log_tool(ctx, "run_file", filename)

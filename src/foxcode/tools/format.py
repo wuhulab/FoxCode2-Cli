@@ -3,6 +3,7 @@ from ..models import WorkspaceDeps
 from . import log_tool, permission_validator, run_subprocess
 
 
+# NOTE:各语言对应的格式化命令映射（单文件维度），按文件后缀匹配
 FORMATTERS = {
     ".py": (["python", "-m", "black"], ["python", "-m", "isort", "--profile", "black"]),
     ".js": (["npx", "prettier", "--write"],),
@@ -18,6 +19,7 @@ FORMATTERS = {
 }
 
 
+# NOTE:注册代码格式化工具：支持指定单文件或目录，按后缀自动匹配 black/prettier 等
 def register(agent):
     @agent.tool(args_validator=permission_validator("format_code"))
     async def format_code(

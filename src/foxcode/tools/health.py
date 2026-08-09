@@ -8,6 +8,7 @@ from ..models import WorkspaceDeps
 from . import log_tool, permission_validator, run_subprocess
 
 
+# NOTE:各语言对应的关键配置文件清单（包管理、测试、Linter、格式化）
 CHECKS = {
     ".py": {
         "package_files": ["requirements.txt", "pyproject.toml"],
@@ -42,6 +43,7 @@ CHECKS = {
 }
 
 
+# NOTE:通过统计文件后缀数量检测项目主要编程语言
 def _detect_langs(workspace_dir: Path) -> list[str]:
     """检测项目中使用的主要编程语言。"""
     from . import iter_project_files
@@ -55,6 +57,7 @@ def _detect_langs(workspace_dir: Path) -> list[str]:
     return sorted(counts.keys(), key=lambda k: counts[k], reverse=True)
 
 
+# NOTE:检查工作区中是否存在给定文件名列表中的任意一个文件
 def _has_file(workspace_dir: Path, filenames: list[str]) -> tuple[bool, str]:
     for name in filenames:
         path = workspace_dir / name
@@ -63,6 +66,7 @@ def _has_file(workspace_dir: Path, filenames: list[str]) -> tuple[bool, str]:
     return False, ""
 
 
+# NOTE:检查工作区是否包含匹配给定模式（通配符或文件名）的任意文件
 def _has_pattern(workspace_dir: Path, patterns: list[str]) -> tuple[bool, str]:
     from . import iter_project_files
 
@@ -78,6 +82,7 @@ def _has_pattern(workspace_dir: Path, patterns: list[str]) -> tuple[bool, str]:
     return False, ""
 
 
+# NOTE:检查 Git 仓库状态，返回未提交变更数量或状态提示
 async def _check_git(workspace_dir: Path) -> str:
     try:
         result = await run_subprocess(
@@ -95,6 +100,7 @@ async def _check_git(workspace_dir: Path) -> str:
         return f"⚠️ Git 检查失败: {e}"
 
 
+# NOTE:检查项目是否包含测试相关配置文件或测试文件
 def _check_tests(workspace_dir: Path, langs: list[str]) -> str:
     from . import iter_project_files
 
@@ -113,6 +119,7 @@ def _check_tests(workspace_dir: Path, langs: list[str]) -> str:
     return "✅ 检测到测试相关配置/文件" if has_test_files else "⚠️ 未检测到测试配置"
 
 
+# NOTE:检查工作区是否存在 README 文件
 def _check_readme(workspace_dir: Path) -> str:
     for name in ["README.md", "README.rst", "README", "readme.md"]:
         if (workspace_dir / name).exists():
@@ -120,6 +127,7 @@ def _check_readme(workspace_dir: Path) -> str:
     return "⚠️ 未找到 README 文件"
 
 
+# NOTE:检查工作区是否存在 LICENSE 文件
 def _check_license(workspace_dir: Path) -> str:
     for name in ["LICENSE", "LICENSE.md", "COPYING", "license"]:
         if (workspace_dir / name).exists():
@@ -127,6 +135,7 @@ def _check_license(workspace_dir: Path) -> str:
     return "⚠️ 未找到 LICENSE 文件"
 
 
+# NOTE:注册项目健康检查工具：综合分析语言、依赖、Git、测试、文档与配置
 def register(agent):
     @agent.tool(args_validator=permission_validator("project_health"))
     async def project_health(ctx: RunContext[WorkspaceDeps]) -> str:

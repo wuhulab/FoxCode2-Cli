@@ -12,6 +12,7 @@ from .models import ActionPlan, WorkspaceDeps
 from .permissions import is_write_tool
 
 
+# NOTE:计划模式下动态隐藏写/执行类工具，限制模型只能只读探索
 async def _prepare_main_tools(
     ctx: RunContext[WorkspaceDeps], tool_defs: list[ToolDefinition]
 ) -> list[ToolDefinition]:
@@ -21,6 +22,7 @@ async def _prepare_main_tools(
     return tool_defs
 
 
+# NOTE:构建主 Agent，整合系统提示、项目指南、用户规则、记忆、技能与子代理列表
 def create_agent(
     config: dict,
     http_client: httpx.AsyncClient | None = None,
@@ -31,6 +33,7 @@ def create_agent(
     rules: str = "",
     memory: str = "",
 ) -> Agent[WorkspaceDeps, ActionPlan]:
+    # NOTE:初始化 OpenAI 兼容模型（支持自定义 base_url 与密钥）
     model = OpenAIChatModel(
         config["model"],
         provider=OpenAIProvider(
@@ -40,11 +43,14 @@ def create_agent(
         ),
     )
 
+    # NOTE:从配置读取温度参数控制生成随机性
     model_settings = ModelSettings(temperature=config["temperature"])
 
+    # NOTE:加载内置系统提示，作为 AI 行为基线约束
     prompt_file = Path(__file__).parent / "system_prompt.md"
     system_prompt = prompt_file.read_text(encoding="utf-8").strip()
 
+    # NOTE:追加项目级自定义指南（来自 .foxcode/instructions.md）
     if project_instructions:
         system_prompt += (
             "\n\n---\n"
@@ -53,6 +59,7 @@ def create_agent(
             f"{project_instructions}"
         )
 
+    # NOTE:注入用户规则（.foxcode/Rules.md），声明最高优先级且 AI 只读
     if rules:
         system_prompt += (
             "\n\n---\n"
@@ -63,6 +70,7 @@ def create_agent(
             f"{rules}"
         )
 
+    # NOTE:注入 AI 维护的项目记忆（.foxcode/Memory.md），用于避免已知陷阱
     if memory:
         system_prompt += (
             "\n\n---\n"
@@ -74,6 +82,7 @@ def create_agent(
             f"{memory}"
         )
 
+    # NOTE:追加可用 Skills 列表，供 AI 按需加载使用
     if skills_list:
         lines = [
             "\n\n---\n## Available Skills (load content on demand with list_skills / use_skill)"
@@ -82,6 +91,7 @@ def create_agent(
             lines.append(f"- {name}: {desc}")
         system_prompt += "\n".join(lines)
 
+    # NOTE:追加可用子代理列表，供 AI 委派只读探索任务
     if subagent_list:
         lines = [
             "\n\n---\n## Available Subagents (invoke with the task tool, specifying the agent argument)"
@@ -90,8 +100,10 @@ def create_agent(
             lines.append(f"- {name}: {desc}")
         system_prompt += "\n".join(lines)
 
+    # NOTE:为 MCP 工具集添加前缀命名空间，防止与本地工具冲突
     mcp_toolsets = [t.prefixed(t.id) for t in (mcp_toolsets or [])] or None
 
+    # NOTE:创建主 Agent，绑定结构化输出类型 ActionPlan
     agent: Agent[WorkspaceDeps, ActionPlan] = Agent(
         model,
         deps_type=WorkspaceDeps,
@@ -103,10 +115,12 @@ def create_agent(
         retries=3,
     )
 
+    # NOTE:注册全部本地工具到 Agent（核心 + 增强工具）
     from .tools import register_all_tools
 
     register_all_tools(agent)
 
+    # NOTE:注册 Skills 和子代理功能（视为特殊工具集）
     from . import skills, subagents
 
     skills.register(agent)

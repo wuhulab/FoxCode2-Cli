@@ -11,6 +11,7 @@ from .permissions import PermissionManager, inherit_permissions
 from .subagents import create_subagent_agent
 
 
+# NOTE:验收 AI 的结构化输出模型：是否完成、依据理由、未完成缺口列表
 class GoalVerification(BaseModel):
     completed: bool = Field(description="目标是否真正完成")
     reason: str = Field(description="判断依据 / 验收结论")
@@ -19,6 +20,7 @@ class GoalVerification(BaseModel):
     )
 
 
+# NOTE:验收 AI 的系统提示：要求其独立验证、不信任主 AI 自述、必须列出具体缺口
 VERIFIER_SYSTEM_PROMPT = """You are a strict Goal Verifier. Your only job is to objectively check, in a fully independent context, whether the user's goal has actually been completed.
 
 Rules:
@@ -33,6 +35,7 @@ Rules:
 6. Do not overthink. Inspect efficiently with the minimum tool calls needed and give a decisive verdict."""
 
 
+# NOTE:创建专门用于验收目标的只读子代理，返回结构化 GoalVerification
 def create_goal_verifier(config: dict, http_client):
     """创建独立上下文的验收 AI（只读、结构化输出）。"""
     return create_subagent_agent(
@@ -43,6 +46,7 @@ def create_goal_verifier(config: dict, http_client):
     )
 
 
+# NOTE:为验收 AI 构建隔离的运行时依赖：继承权限、清空项目指令、独立 ToolTracker
 def _verifier_deps(parent: WorkspaceDeps) -> WorkspaceDeps:
     """为验收 AI 构建隔离的只读 deps（继承父会话权限设置，避免重复询问）。"""
     perms = PermissionManager(
@@ -69,6 +73,7 @@ def _verifier_deps(parent: WorkspaceDeps) -> WorkspaceDeps:
     )
 
 
+# NOTE:调用验收 AI 对目标完成情况进行独立核查，返回结构化验收结果
 async def verify_goal(
     deps: WorkspaceDeps,
     goal: str,
