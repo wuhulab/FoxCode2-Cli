@@ -12,8 +12,8 @@ from pydantic_ai.settings import ModelSettings
 from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.usage import UsageLimits
 
-from .models import ToolTracker, WorkspaceDeps
-from .permissions import PermissionManager, is_write_tool
+from .models import WorkspaceDeps, fork_workspace_deps
+from .permissions import is_write_tool
 from .tools import permission_validator
 
 
@@ -147,34 +147,6 @@ def create_subagent_agent(
     return child
 
 
-# NOTE:基于父会话构建子代理隔离依赖：继承权限、独立 tracker、清空项目指令
-def _child_deps(ctx: RunContext[WorkspaceDeps]) -> WorkspaceDeps:
-    perms = PermissionManager(
-        console=ctx.deps.console,
-        workspace_dir=ctx.deps.workspace_dir,
-        tool_tracker=None,
-    )
-    from .permissions import inherit_permissions
-
-    inherit_permissions(ctx.deps, perms)
-    perms.subagent_mode = True
-    return WorkspaceDeps(
-        workspace_dir=ctx.deps.workspace_dir,
-        http_client=ctx.deps.http_client,
-        undo_manager=ctx.deps.undo_manager,
-        console=ctx.deps.console,
-        tool_tracker=ToolTracker(),
-        shell_timeout=ctx.deps.shell_timeout,
-        project_instructions="",
-        permissions=perms,
-        plan_mode=False,
-        skills=None,
-        subagents=None,
-        mcp_toolsets=None,
-        config=ctx.deps.config,
-    )
-
-
 # NOTE:运行指定子代理执行只读探索任务，结果超长时自动截断并返回摘要
 async def run_subagent(
     ctx: RunContext[WorkspaceDeps],
@@ -236,7 +208,7 @@ async def run_subagent(
         # 子代理可能需要大量只读调查，使用与主 agent 相同的无限请求限制
         result = await agent.run(
             prompt,
-            deps=_child_deps(ctx),
+            deps=fork_workspace_deps(ctx.deps),
             usage_limits=UsageLimits(request_limit=None),
             event_stream_handler=_dummy_event_handler,
         )

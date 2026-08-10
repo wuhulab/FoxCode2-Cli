@@ -405,7 +405,7 @@ def test_inherit_permissions_solo_mode():
         parent.permissions.mode = "acceptEdits"
 
         child_perms = PermissionManager(workspace_dir=Path(td))
-        inherit_permissions(parent, child_perms)
+        inherit_permissions(parent.permissions, child_perms)
 
         assert child_perms.solo_mode is True
         assert child_perms.headless is True

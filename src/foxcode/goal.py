@@ -6,8 +6,7 @@
 from pydantic import BaseModel, Field
 from pydantic_ai.usage import UsageLimits
 
-from .models import ToolTracker, WorkspaceDeps
-from .permissions import PermissionManager, inherit_permissions
+from .models import WorkspaceDeps, fork_workspace_deps
 from .subagents import create_subagent_agent
 
 
@@ -46,33 +45,6 @@ def create_goal_verifier(config: dict, http_client):
     )
 
 
-# NOTE:为验收 AI 构建隔离的运行时依赖：继承权限、清空项目指令、独立 ToolTracker
-def _verifier_deps(parent: WorkspaceDeps) -> WorkspaceDeps:
-    """为验收 AI 构建隔离的只读 deps（继承父会话权限设置，避免重复询问）。"""
-    perms = PermissionManager(
-        console=parent.console,
-        workspace_dir=parent.workspace_dir,
-        tool_tracker=None,
-    )
-    inherit_permissions(parent, perms)
-    perms.subagent_mode = True
-    return WorkspaceDeps(
-        workspace_dir=parent.workspace_dir,
-        http_client=parent.http_client,
-        undo_manager=parent.undo_manager,
-        console=parent.console,
-        tool_tracker=ToolTracker(),
-        shell_timeout=parent.shell_timeout,
-        project_instructions="",
-        permissions=perms,
-        plan_mode=False,
-        skills=None,
-        subagents=None,
-        mcp_toolsets=None,
-        config=parent.config,
-    )
-
-
 # NOTE:调用验收 AI 对目标完成情况进行独立核查，返回结构化验收结果
 async def verify_goal(
     deps: WorkspaceDeps,
@@ -99,7 +71,7 @@ async def verify_goal(
     # 验收 AI 可能需要大量只读检查（文件/搜索/历史），使用与主 agent 相同的无限请求限制
     result = await verifier_agent.run(
         prompt,
-        deps=_verifier_deps(deps),
+        deps=fork_workspace_deps(deps),
         usage_limits=UsageLimits(request_limit=None),
         event_stream_handler=_dummy_event_handler,
     )

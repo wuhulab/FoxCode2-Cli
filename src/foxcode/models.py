@@ -438,3 +438,45 @@ class WorkspaceDeps:
     subagents: Any = None
     mcp_toolsets: Any = None
     config: dict = field(default_factory=dict)
+
+
+# NOTE:基于父会话创建子代理/验收 AI 的隔离 deps，继承通用配置但重置易变状态
+WORKSPACE_DEPS_CHILD_OVERRIDES = {
+    "project_instructions": "",
+    "plan_mode": False,
+    "skills": None,
+    "subagents": None,
+    "mcp_toolsets": None,
+    "tool_tracker": None,
+}
+
+
+def fork_workspace_deps(parent: "WorkspaceDeps") -> "WorkspaceDeps":
+    """复制一份隔离的子代理运行时依赖。
+
+    - config 做浅拷贝，防止子代理意外修改影响父会话
+    - 权限继承父会话设置（避免重复确认）
+    - 工具统计、skills、子代理引用重新初始化，保持隔离
+    """
+    from dataclasses import replace
+    from .permissions import PermissionManager, inherit_permissions
+
+    perms = PermissionManager(
+        console=parent.console,
+        workspace_dir=parent.workspace_dir,
+        tool_tracker=None,
+    )
+    inherit_permissions(parent.permissions, perms)
+
+    child = replace(
+        parent,
+        tool_tracker=ToolTracker(),
+        permissions=perms,
+        project_instructions="",
+        plan_mode=False,
+        skills=None,
+        subagents=None,
+        mcp_toolsets=None,
+        config=dict(parent.config),
+    )
+    return child

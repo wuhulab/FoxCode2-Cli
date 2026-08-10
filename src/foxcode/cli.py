@@ -119,7 +119,21 @@ class RetryClient(httpx.AsyncClient):
     MAX_RETRIES = 5
 
     def __init__(self, *args, **kwargs):
-        kwargs.setdefault("timeout", httpx.Timeout(120.0))
+        # 为长思考/流式场景优化：连接10s、读取5分钟、写入10s、pool 10s
+        # read 超时限制的是两次数据包之间的间隔（非总耗时），5分钟足够长思考模型
+        kwargs.setdefault(
+            "timeout",
+            httpx.Timeout(connect=10.0, read=300.0, write=10.0, pool=10.0),
+        )
+        # 保持更多长连接，防止中间代理因空闲关闭导致 incomplete chunked read
+        kwargs.setdefault(
+            "limits",
+            httpx.Limits(
+                max_keepalive_connections=20,
+                max_connections=100,
+                keepalive_expiry=300.0,
+            ),
+        )
         super().__init__(*args, **kwargs)
 
     async def send(self, request, *args, **kwargs):
@@ -176,9 +190,25 @@ class RetryClient(httpx.AsyncClient):
                         f"  [red]请求异常: {e}，已达最大重试次数 {self.MAX_RETRIES}[/red]"
                     )
                     raise
-                wait = min(15 * retry_count, 120)
+                # 连接类抖动使用固定短间隔快速重试，避免长等待
+                wait = min(5 * retry_count, 30)
                 console.print(
                     f"  [yellow]请求异常: {e}，{wait}秒后重试 (第{retry_count}次)[/yellow]"
+                )
+                await asyncio.sleep(wait)
+            except httpx.ProtocolError as e:
+                # ProtocolError（如 RemoteProtocolError / LocalProtocolError /
+                # incomplete chunked read）是 TransportError 子类，理论上已被
+                # 上面捕获；此处兜底防止因 httpx 版本差异导致漏网
+                retry_count += 1
+                if retry_count > self.MAX_RETRIES:
+                    console.print(
+                        f"  [red]协议异常: {e}，已达最大重试次数 {self.MAX_RETRIES}[/red]"
+                    )
+                    raise
+                wait = min(5 * retry_count, 30)
+                console.print(
+                    f"  [yellow]协议异常: {e}，{wait}秒后重试 (第{retry_count}次)[/yellow]"
                 )
                 await asyncio.sleep(wait)
 

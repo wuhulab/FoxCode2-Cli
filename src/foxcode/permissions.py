@@ -165,22 +165,23 @@ def is_write_tool(tool_name: str) -> bool:
 
 
 # NOTE:权限继承：子代理/验收 AI 从父会话复制权限设置，避免重复询问
-def inherit_permissions(parent: Any, perms: "PermissionManager") -> None:
+def inherit_permissions(
+    parent: "PermissionManager | None", perms: "PermissionManager"
+) -> None:
     """从父会话复制权限相关设置到子（子代理/验收 AI），避免重复询问。
 
-    parent 为 WorkspaceDeps，其 permissions 属性为父会话的 PermissionManager。
+    若 parent 为 None，则不做任何操作（保持默认权限）。
     """
-    parent_perms = getattr(parent, "permissions", None)
-    if parent_perms is None:
+    if parent is None:
         return
-    perms.solo_mode = parent_perms.solo_mode
-    perms.headless = parent_perms.headless
-    perms.mode = parent_perms.mode
-    perms.allow_rules = list(parent_perms.allow_rules)
-    perms.ask_rules = list(parent_perms.ask_rules)
-    perms.deny_rules = list(parent_perms.deny_rules)
-    perms._session_always = set(parent_perms._session_always)
-    perms._session_never = set(parent_perms._session_never)
+    perms.solo_mode = parent.solo_mode
+    perms.headless = parent.headless
+    perms.mode = parent.mode
+    perms.allow_rules = list(parent.allow_rules)
+    perms.ask_rules = list(parent.ask_rules)
+    perms.deny_rules = list(parent.deny_rules)
+    perms._session_always = set(parent._session_always)
+    perms._session_never = set(parent._session_never)
 
 
 # NOTE:用户自定义权限规则（支持通配符与正则匹配目标）
@@ -233,7 +234,6 @@ class PermissionManager:
     mode: str = "acceptEdits"
     plan_mode: bool = False
     headless: bool = False
-    subagent_mode: bool = False
     solo_mode: bool = False
 
     allow_rules: list[PermissionRule] = field(default_factory=list)
