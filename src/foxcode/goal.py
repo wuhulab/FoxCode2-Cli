@@ -90,10 +90,17 @@ async def verify_goal(
         f"Inspect the workspace yourself with read-only tools, rigorously verify whether the goal is "
         f"actually complete, and output the structured verdict."
     )
+
+    async def _dummy_event_handler(_ctx, stream):
+        # 强制底层走 stream 路径，避免长思考被中间代理截断
+        async for _ in stream:
+            pass
+
     # 验收 AI 可能需要大量只读检查（文件/搜索/历史），使用与主 agent 相同的无限请求限制
     result = await verifier_agent.run(
         prompt,
         deps=_verifier_deps(deps),
         usage_limits=UsageLimits(request_limit=None),
+        event_stream_handler=_dummy_event_handler,
     )
     return result.output

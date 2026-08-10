@@ -226,12 +226,19 @@ async def run_subagent(
     ctx.deps.console.print(
         f"  [dim]子代理 {definition.name if definition else 'general'} 启动...[/dim]"
     )
+
+    async def _dummy_event_handler(_ctx, stream):
+        # 强制底层走 stream 路径，避免长思考被中间代理截断
+        async for _ in stream:
+            pass
+
     try:
         # 子代理可能需要大量只读调查，使用与主 agent 相同的无限请求限制
         result = await agent.run(
             prompt,
             deps=_child_deps(ctx),
             usage_limits=UsageLimits(request_limit=None),
+            event_stream_handler=_dummy_event_handler,
         )
         output = result.output or ""
     except Exception as e:

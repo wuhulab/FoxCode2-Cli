@@ -704,7 +704,7 @@ async def _select_model_interactive(
     return choice
 
 
-# NOTE:非流式运行 agent 并实时输出 AI 在工具调用间隙的旁白/思考文本，便于用户观察 AI 思路
+# NOTE:底层强制流式请求（避免长思考被中间代理截断），前台仍按非流式方式展示结果
 async def _run_with_narration(
     agent,
     prompt: str | Sequence[Any] | None,
@@ -713,13 +713,16 @@ async def _run_with_narration(
     config: dict,
     status=None,
 ):
-    """非流式执行 agent.iter，并在 AI 调用工具时输出其附带的话。
+    """底层强制流式运行 agent，前台非流式输出结果。
 
-    遍历模型响应，将 AI 在调用工具时输出的文字/思考直接打印出来，
-    便于协作开发确认 AI 没有走偏。返回 (all_messages, plan, usage)。
+    对每个 ModelRequestNode 走 stream() 路径并完整 drain，确保 API 请求始终使用
+    stream=true，避免长思考/长响应被中间代理或网关半途截断。工具调用间隙的旁白/
+    思考文本仍按原逻辑打印。返回 (all_messages, plan, usage)。
     """
     from pydantic_ai.messages import TextPart, ThinkingPart, ToolCallPart
     from pydantic_ai.usage import UsageLimits
+    from pydantic_ai._agent_graph import ModelRequestNode
+    from pydantic_graph import End
 
     status_paused = False
 
@@ -747,8 +750,18 @@ async def _run_with_narration(
         deps=deps,
         usage_limits=UsageLimits(request_limit=None),
     ) as agent_run:
-        async for node in agent_run:
-            response = getattr(node, "model_response", None)
+        next_node = agent_run.next_node
+        while not isinstance(next_node, End):
+            if isinstance(next_node, ModelRequestNode):
+                # 强制走 stream 路径并完整 drain，不在前台逐字输出
+                async with next_node.stream(agent_run.ctx) as agent_stream:
+                    await agent_stream.drain()
+                # stream 完成后 _result 已设置，再让 graph 继续推进
+                next_node = await agent_run.next(next_node)
+            else:
+                next_node = await agent_run.next(next_node)
+
+            response = getattr(next_node, "model_response", None)
             if response is None:
                 continue
             has_tool_calls = any(isinstance(p, ToolCallPart) for p in response.parts)
@@ -853,10 +866,11 @@ async def _run_status_loop(
     deps: WorkspaceDeps,
     config: dict,
 ):
-    """在 console.status 内执行一次 agent.iter（非流式），处理审批暂停。
+    """在 console.status 内执行一次 agent 运行，处理审批暂停。
 
-    AI 保持非流式运行；遍历模型响应时直接输出 AI 在调用工具时附带的话，
-    便于协作开发确认，同时避免流式输出与 console.status 交错导致显示问题。
+    底层模型请求强制走流式（避免长思考被中间代理截断），前台仍按非流式方式
+    展示最终结果。遍历模型响应时直接输出 AI 在调用工具时附带的话，
+    便于协作开发确认，同时避免前台流式输出与 console.status 交错导致显示问题。
     """
     with console.status("", spinner="fox") as status:
         deps.permissions.status = status
@@ -2025,9 +2039,7 @@ async def _run_interactive(config: dict, args):
                 async with agent:
                     await _run_loop()
             except Exception as e:
-                console.print(
-                    f"[yellow]⚠ MCP 初始化失败: {e}[/yellow]\n"
-                )
+                console.print(f"[yellow]⚠ MCP 初始化失败: {e}[/yellow]\n")
                 agent = create_agent(
                     config,
                     http_client,
