@@ -40,7 +40,8 @@ foxcode/
     ├── mode.py         # 计划模式切换
     ├── security.py     # 安全检测
     ├── memory.py       # AI 长期记忆（update_memory：维护 .foxcode/Memory.md）
-    └── multi_edit.py   # 多文件批量编辑、diff 应用、批量创建
+    ├── multi_edit.py   # 多文件批量编辑、diff 应用、批量创建
+    └── spec.py         # 规格说明生成与读取（generate_spec / read_spec）
 ```
 
 ### 数据流
@@ -140,6 +141,7 @@ def register(agent):
 - [x] IDE 插件（VSCode）
 - [x] Goal 模式（/goal）- AI 完成后由独立上下文验收 AI 确认目标，未完成则继续直到达成；支持 goal.md/plan.md/todo.md 持久化以抵抗上下文压缩，每轮自动 git 提交进度检查点
 - [x] 项目记忆与用户规则 - `.foxcode/Memory.md` 为 AI 可写记忆（通过 `update_memory` 工具，普通文件工具拦截）；`.foxcode/Rules.md` 为用户规则（AI 只读，所有文件写工具强制拦截）
+- [x] Spec 规格说明生成 - `/spec` 命令触发需求分析，AI 调用 `generate_spec` 生成 `.foxcode/SPEC.md`（含需求、技术方案、API 设计、数据模型、实现步骤、测试计划、验收标准），作为后续编码蓝图
 
 ├── vscode-extension/   # VS Code 插件
 │   ├── package.json

@@ -28,6 +28,7 @@ READ_ONLY_TOOLS = frozenset(
         "enter_plan_mode",
         "exit_plan_mode",
         "index_codebase",
+        "read_spec",
         "search_symbols",
         "get_symbol_context",
         "review_changes",
@@ -61,6 +62,7 @@ WRITE_TOOLS = frozenset(
         "start_preview",
         "stop_preview",
         "update_memory",
+        "generate_spec",
     }
 )
 

@@ -841,6 +841,108 @@ def test_write_file_camelcase_alias_validation():
     }
 
 
+def test_spec_tools_registered():
+    """generate_spec 和 read_spec 应正确注册到 agent。"""
+    from foxcode.agent import create_agent
+
+    agent = create_agent(dict(CONFIG), None)
+    assert "generate_spec" in agent._function_toolset.tools
+    assert "read_spec" in agent._function_toolset.tools
+
+
+def test_generate_spec_and_read_spec():
+    """generate_spec 应写入文件，read_spec 应正确读取。"""
+    from foxcode.tools.spec import _do_generate_spec, _do_read_spec
+
+    tmpdir = Path(tempfile.mkdtemp())
+    result = _do_generate_spec(tmpdir, "My Feature", "Overview\n\nThis is a spec.")
+    assert "已保存" in result
+    assert (tmpdir / ".foxcode" / "SPEC.md").exists()
+
+    content = (tmpdir / ".foxcode" / "SPEC.md").read_text(encoding="utf-8")
+    assert "# My Feature" in content
+    assert "Overview" in content
+
+    result = _do_read_spec(tmpdir)
+    assert "My Feature" in result
+    assert "Overview" in result
+
+
+def test_plan_mode_denies_generate_spec():
+    """计划模式下 generate_spec（写操作）应被拒绝。"""
+    from foxcode.permissions import PermissionManager
+
+    tmpdir = Path(tempfile.mkdtemp())
+    perms = PermissionManager(workspace_dir=tmpdir)
+    perms.headless = True
+    perms.plan_mode = True
+    deps = _make_deps(tmpdir, perms=perms, plan_mode=True)
+
+    err = perms.check("generate_spec", (), {"title": "Test", "content": "x"})
+    assert err is not None
+    assert "plan mode" in err.lower() or "denied" in err.lower()
+
+
+def test_generate_spec_custom_path():
+    """generate_spec 应支持自定义路径。"""
+    import os
+    from foxcode.tools.spec import _do_generate_spec, _do_read_spec
+
+    tmpdir = Path(tempfile.mkdtemp())
+    custom = "docs/design.md"
+    result = _do_generate_spec(tmpdir, "Design", "Content here", path=custom)
+    assert "已保存" in result
+    assert os.path.join("docs", "design.md") in result or "docs/design.md" in result
+    assert (tmpdir / "docs" / "design.md").exists()
+
+    result = _do_read_spec(tmpdir, path=custom)
+    assert "Content here" in result
+
+
+def test_generate_spec_overwrite():
+    """generate_spec 应能覆盖已有文件。"""
+    from foxcode.tools.spec import _do_generate_spec, _do_read_spec
+
+    tmpdir = Path(tempfile.mkdtemp())
+    _do_generate_spec(tmpdir, "Old", "old content")
+    _do_generate_spec(tmpdir, "New", "new content")
+
+    content = _do_read_spec(tmpdir)
+    assert "new content" in content
+    assert "old content" not in content
+
+
+def test_generate_spec_skips_header_when_content_has_heading():
+    """当 content 以 # 开头时，不应再自动添加 title 作为一级标题。"""
+    from foxcode.tools.spec import _do_generate_spec
+
+    tmpdir = Path(tempfile.mkdtemp())
+    _do_generate_spec(tmpdir, "Ignored", "# Already Has Title\n\nbody")
+    content = (tmpdir / ".foxcode" / "SPEC.md").read_text(encoding="utf-8")
+    assert content == "# Already Has Title\n\nbody"
+
+
+def test_read_spec_missing_file():
+    """read_spec 在文件不存在时应返回友好错误。"""
+    from foxcode.tools.spec import _do_read_spec
+
+    tmpdir = Path(tempfile.mkdtemp())
+    result = _do_read_spec(tmpdir, path="nonexistent.md")
+    assert "错误:" in result
+    assert "不存在" in result
+
+
+def test_read_spec_permission_allowed():
+    """read_spec 是只读工具，在默认模式下应被允许。"""
+    from foxcode.permissions import PermissionManager
+
+    tmpdir = Path(tempfile.mkdtemp())
+    perms = PermissionManager(workspace_dir=tmpdir)
+    perms.headless = True
+    err = perms.check("read_spec", (), {"path": ".foxcode/SPEC.md"})
+    assert err is None, f"read_spec 不应被拒绝，但收到: {err}"
+
+
 if __name__ == "__main__":
     import json
 
@@ -867,4 +969,20 @@ if __name__ == "__main__":
     print("  ok - test_plan_mode_prepare_hides_write_tools")
     asyncio.run(test_goal_verifier_runs())
     print("  ok - test_goal_verifier_runs")
+    test_spec_tools_registered()
+    print("  ok - test_spec_tools_registered")
+    test_generate_spec_and_read_spec()
+    print("  ok - test_generate_spec_and_read_spec")
+    test_plan_mode_denies_generate_spec()
+    print("  ok - test_plan_mode_denies_generate_spec")
+    test_generate_spec_custom_path()
+    print("  ok - test_generate_spec_custom_path")
+    test_generate_spec_overwrite()
+    print("  ok - test_generate_spec_overwrite")
+    test_generate_spec_skips_header_when_content_has_heading()
+    print("  ok - test_generate_spec_skips_header_when_content_has_heading")
+    test_read_spec_missing_file()
+    print("  ok - test_read_spec_missing_file")
+    test_read_spec_permission_allowed()
+    print("  ok - test_read_spec_permission_allowed")
     print("ALL TESTS PASSED")

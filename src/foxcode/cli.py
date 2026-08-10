@@ -65,6 +65,7 @@ def _make_prompt_session(history_file: Path):
             ("/skills", "列出可用 Skills"),
             ("/skill ", "加载指定 Skill"),
             ("/agents", "列出可用子代理"),
+            ("/spec ", "生成技术规格说明"),
             ("/term", "切换终端模式"),
             ("/clear", "清屏"),
             ("/history", "显示操作历史"),
@@ -255,6 +256,7 @@ def print_welcome():
         "[yellow]/skills[/yellow] Skills  "
         "[yellow]/agents[/yellow] 子代理  "
         "[yellow]/term[/yellow] 终端模式  "
+        "[yellow]/spec[/yellow] 规格说明  "
         "[yellow]/commit[/yellow] 智能提交  "
         "[yellow]/session[/yellow] 会话管理  "
         "[yellow]/usage[/yellow] 用量统计  "
@@ -276,6 +278,7 @@ def print_help():
         "/goal <目标>", "设定目标，AI 完成后自动验收，未完成则继续直到确认达成"
     )
     table.add_row("/plan", "切换计划模式（只读探索，先出方案）")
+    table.add_row("/spec <需求>", "生成技术规格说明文档（SPEC.md），先出方案再编码")
     table.add_row("/solo", "切换无人值守模式（自动放行，只拦截高危命令）")
     table.add_row("/permissions", "查看当前权限模式与规则")
     table.add_row("/free", "切换到内置免费 API 并选择模型")
@@ -1264,8 +1267,7 @@ async def _run_interactive(config: dict, args):
         perms.solo_mode = True
 
     console.print("FoxCode")
-    console.print(f"[dim]工作目录: {workspace_dir}[/dim]")
-    console.print(f"[dim]模型: {config['model']}[/dim]")
+    console.print(f"[dim]工作目录: {workspace_dir} | 模型: {config['model']}[/dim]")
     if project_config["instructions"]:
         console.print(
             f"[dim]项目指南: .foxcode/instructions.md 已加载 ({len(project_config['instructions'])} 字符)[/dim]"
@@ -1459,6 +1461,65 @@ async def _run_interactive(config: dict, args):
                         console.print(
                             f"[yellow]计划模式 {'开启' if deps.plan_mode else '关闭'}[/yellow]"
                         )
+                        continue
+                    elif cmd.startswith("/spec"):
+                        parts = prompt.split(maxsplit=1)
+                        spec_query = parts[1] if len(parts) > 1 else ""
+                        if not spec_query:
+                            # 无参数时读取并显示当前 SPEC.md
+                            spec_path = workspace_dir / ".foxcode" / "SPEC.md"
+                            if spec_path.exists():
+                                content = spec_path.read_text(encoding="utf-8")
+                                console.print(
+                                    Panel(
+                                        Markdown(content),
+                                        title="[bold cyan]当前规格说明[/bold cyan]",
+                                        border_style="cyan",
+                                    )
+                                )
+                            else:
+                                console.print(
+                                    "[yellow]暂无规格说明文件 (.foxcode/SPEC.md)，"
+                                    "可使用 /spec <需求描述> 生成[/yellow]"
+                                )
+                        else:
+                            # 有参数时进入 spec 生成流程
+                            spec_prompt = (
+                                "[Spec mode] STRICT RULES:\n"
+                                "1. FIRST investigate the codebase using read-only tools "
+                                "(tree, read_file, search_symbols, etc.) to understand existing structure.\n"
+                                "2. THEN produce a structured technical specification following this template:\n"
+                                "   - 1. Requirements Overview (background, goals, scope)\n"
+                                "   - 2. Technical Solution (stack, architecture, data flow)\n"
+                                "   - 3. API Design (endpoints, parameters, auth)\n"
+                                "   - 4. Data Model (entities, schema, state machine)\n"
+                                "   - 5. Implementation Steps (phases, risks, rollback)\n"
+                                "   - 6. Test Plan (unit/integration/performance coverage)\n"
+                                "   - 7. Acceptance Criteria (checklist, non-functional metrics, deliverables)\n"
+                                "3. You MUST call `generate_spec` to save the spec to .foxcode/SPEC.md. "
+                                "Only writing to explanation is NOT enough — the user needs a saved file.\n"
+                                "4. Do NOT write any implementation code, tests, or config files yet. "
+                                "Only produce the specification document.\n\n"
+                                f"Requirement: {spec_query}"
+                            )
+                            send_prompt = _expand_file_refs(spec_prompt, workspace_dir)
+                            send_prompt = _parse_image_refs(send_prompt, workspace_dir)
+                            try:
+                                all_messages, plan = await _run_status_loop(
+                                    agent, send_prompt, all_messages, deps, config
+                                )
+                                summary = deps.tool_tracker.summary_str()
+                                if summary:
+                                    console.print(
+                                        f"  [bold cyan]工具调用: {summary}[/bold cyan]"
+                                    )
+                                print_action_plan(plan)
+                                if plan.files_modified:
+                                    await _show_colored_diff(
+                                        workspace_dir, plan.files_modified
+                                    )
+                            except Exception as e:
+                                _print_run_error(e)
                         continue
                     elif cmd == "/solo":
                         perms.solo_mode = not perms.solo_mode
@@ -1966,7 +2027,6 @@ async def _run_interactive(config: dict, args):
             except Exception as e:
                 console.print(
                     f"[yellow]⚠ MCP 初始化失败: {e}[/yellow]\n"
-                    "  [dim]已自动禁用 MCP，继续运行...[/dim]"
                 )
                 agent = create_agent(
                     config,

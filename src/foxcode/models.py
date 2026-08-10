@@ -85,6 +85,8 @@ STATUS_NAMES = {
     "use_skill_file": "读取技能文件中",
     "list_skill_files": "列出技能文件中",
     "update_memory": "更新记忆中",
+    "generate_spec": "生成规格说明中",
+    "read_spec": "读取规格说明中",
 }
 
 # NOTE:工具调用统计的双语标签（中文用于展示，英文用于日志）
@@ -134,6 +136,8 @@ COUNT_LABELS = {
     "use_skill_file": ("读取技能文件", "use-skill-file"),
     "list_skill_files": ("列出技能文件", "list-skill-files"),
     "update_memory": ("记忆更新", "memory"),
+    "generate_spec": ("生成规格说明", "gen-spec"),
+    "read_spec": ("读取规格说明", "read-spec"),
 }
 
 

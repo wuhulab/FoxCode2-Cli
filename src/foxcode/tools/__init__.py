@@ -149,6 +149,7 @@ def register_all_tools(agent):
         multi_edit,
         preview,
         review,
+        spec,
     )
 
     register_core_tools(agent)
@@ -161,5 +162,6 @@ def register_all_tools(agent):
         lsp_bridge,
         multi_edit,
         memory,
+        spec,
     ):
         mod.register(agent)
