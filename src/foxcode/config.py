@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -10,9 +11,19 @@ load_dotenv()
 BUILTIN_FREE_BASE_URL = "https://fai.shunx.top/v1"
 BUILTIN_FREE_API_KEY = "sk-C4Dy0S5OFKJ7QoPu8erQc2tTDklW2fBIry34CA8tmFcC1tGr"
 
+# NOTE:项目配置短 TTL 缓存，避免初始化阶段或切换配置时重复读取磁盘
+_PROJECT_CONFIG_CACHE_TTL = 10.0
+_project_config_cache: dict[str, tuple[float, dict]] = {}
+
 
 # NOTE:从工作区 .foxcode/ 目录加载项目级配置（指南、规则、记忆、设置、自定义命令）
 def load_project_config(workspace_dir: Path) -> dict:
+    key = str(workspace_dir.resolve())
+    now = time.monotonic()
+    entry = _project_config_cache.get(key)
+    if entry is not None and now - entry[0] < _PROJECT_CONFIG_CACHE_TTL:
+        return entry[1]
+
     foxcode_dir = workspace_dir / ".foxcode"
     config = {
         "instructions": "",
@@ -54,6 +65,7 @@ def load_project_config(workspace_dir: Path) -> dict:
 
     config["commands"] = load_custom_commands(foxcode_dir)
 
+    _project_config_cache[key] = (now, config)
     return config
 
 

@@ -60,12 +60,15 @@ class CodeIndex:
     symbols: list[Symbol] = field(default_factory=list)
     _file_mtime: dict[str, float] = field(default_factory=dict)
     _last_check: float = 0.0
+    _source_files: list[Path] | None = field(default=None, repr=False)
+    _source_files_ts: float = field(default=0.0, repr=False)
+    SOURCE_LIST_TTL: float = field(default=30.0, repr=False)
 
-    # NOTE:基于文件修改时间判断索引是否过时（带 2 秒节流防止高频扫描）
+    # NOTE:基于文件修改时间判断索引是否过时（带 5 秒节流防止高频扫描）
     def is_stale(self) -> bool:
         """检查索引是否需要更新（基于文件修改时间），带节流防止高频重复扫描。"""
         now = time.monotonic()
-        if now - self._last_check < 2.0:
+        if now - self._last_check < 5.0:
             return False
         self._last_check = now
         known = set(self._file_mtime)
@@ -78,9 +81,17 @@ class CodeIndex:
         return known != seen
 
     def _iter_source_files(self):
-        """遍历源代码文件（剪枝跳过重型/隐藏目录 + 后缀过滤）。"""
+        """遍历源代码文件（剪枝跳过重型/隐藏目录 + 后缀过滤），带 30 秒列表缓存。"""
+        now = time.monotonic()
+        if (
+            self._source_files is not None
+            and now - self._source_files_ts < self.SOURCE_LIST_TTL
+        ):
+            yield from self._source_files
+            return
         from . import iter_project_files
 
+        files: list[Path] = []
         for f in iter_project_files(self.workspace_dir):
             if not f.is_file():
                 continue
@@ -88,13 +99,19 @@ class CodeIndex:
                 continue
             if f.name.startswith("."):
                 continue
+            files.append(f)
             yield f
+        self._source_files = files
+        self._source_files_ts = now
 
     # NOTE:构建代码库索引：先尝试 ctags（多语言），失败则回退到 Python AST
     async def build(self) -> str:
         """构建索引，返回状态信息。"""
         self.symbols.clear()
         self._file_mtime.clear()
+        # 强制刷新源文件列表缓存，确保新创建的文件被纳入
+        self._source_files = None
+        self._source_files_ts = 0.0
 
         # 尝试 ctags
         ctags_result = await self._try_ctags()
@@ -324,13 +341,15 @@ class CodeIndex:
         self, name: str, max_lines: int = 30
     ) -> Optional[tuple[Symbol, str]]:
         """获取符号定义处的代码上下文。"""
+        from .file_ops import _cached_read_text
+
         for sym in self.symbols:
             if sym.name == name:
                 filepath = self.workspace_dir / sym.file
                 if not filepath.exists():
                     return None
                 try:
-                    lines = filepath.read_text(encoding="utf-8").splitlines()
+                    lines = _cached_read_text(filepath).splitlines()
                 except Exception:
                     return None
                 start = max(0, sym.line - 3)

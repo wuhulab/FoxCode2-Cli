@@ -11,6 +11,9 @@ from pydantic_ai.tools import ToolDefinition
 from .models import ActionPlan, WorkspaceDeps
 from .permissions import is_write_tool
 
+# NOTE:缓存 system_prompt.md 内容，避免重复读取磁盘
+_system_prompt_cache: str | None = None
+
 
 # NOTE:计划模式下动态隐藏写/执行类工具，限制模型只能只读探索
 async def _prepare_main_tools(
@@ -47,8 +50,11 @@ def create_agent(
     model_settings = ModelSettings(temperature=config["temperature"])
 
     # NOTE:加载内置系统提示，作为 AI 行为基线约束
-    prompt_file = Path(__file__).parent / "system_prompt.md"
-    system_prompt = prompt_file.read_text(encoding="utf-8").strip()
+    global _system_prompt_cache
+    if _system_prompt_cache is None:
+        prompt_file = Path(__file__).parent / "system_prompt.md"
+        _system_prompt_cache = prompt_file.read_text(encoding="utf-8").strip()
+    system_prompt = _system_prompt_cache
 
     # NOTE:追加项目级自定义指南（来自 .foxcode/instructions.md）
     if project_instructions:

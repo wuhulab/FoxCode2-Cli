@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 from typing import Annotated
 
@@ -11,6 +12,41 @@ from .security import check_content_security, format_security_warnings
 
 # NOTE:缓存已解析的工作区路径（同一 workspace 的多次文件操作无需重复 resolve）
 _workspace_norm_cache: dict[str, str] = {}
+
+# NOTE:文件读取短 TTL 缓存：基于 mtime+size 避免对同一文件的重复磁盘 I/O，写入后自动失效
+_FILE_READ_CACHE_TTL = 3.0  # seconds
+_file_read_cache: dict[
+    str, tuple[float, float, int, str]
+] = {}  # path -> (timestamp, mtime, size, content)
+
+
+def _cached_read_text(filepath: Path) -> str:
+    """带短 TTL 缓存的 read_text，优先命中缓存减少重复 I/O。"""
+    key = str(filepath)
+    now = time.monotonic()
+    entry = _file_read_cache.get(key)
+    if entry is not None:
+        ts, mtime, size, content = entry
+        if now - ts < _FILE_READ_CACHE_TTL:
+            try:
+                st = filepath.stat()
+                if st.st_mtime == mtime and st.st_size == size:
+                    return content
+            except OSError:
+                pass
+    content = filepath.read_text(encoding="utf-8", errors="replace")
+    try:
+        st = filepath.stat()
+        _file_read_cache[key] = (now, st.st_mtime, st.st_size, content)
+    except OSError:
+        pass
+    return content
+
+
+def _invalidate_file_cache(filepath: Path):
+    """文件写入/删除后使对应缓存失效。"""
+    _file_read_cache.pop(str(filepath), None)
+
 
 # NOTE:受保护文件清单：AI 不可通过普通文件工具直接修改（Rules.md 只读、Memory.md 需专用工具）
 PROTECTED_WRITE = {
@@ -67,20 +103,17 @@ def _read_file_range(
     end_line 为 0 或超出总行数时读取到文件末尾。
     start_line 超出总行数时抛 ValueError。
     """
-    total = 0
-    selected: list[str] = []
-    with filepath.open("r", encoding="utf-8", errors="replace") as f:
-        for idx, line in enumerate(f, 1):
-            total = idx
-            if idx >= start_line and (end_line == 0 or idx <= end_line):
-                selected.append(line)
+    content = _cached_read_text(filepath)
+    lines = content.splitlines(keepends=True)
+    total = len(lines)
     if start_line < 1:
         start_line = 1
     if end_line == 0 or end_line > total:
         end_line = total
     if start_line > total:
         raise ValueError(f"起始行 {start_line} 超出文件总行数 {total}")
-    return start_line, end_line, total, "".join(selected)
+    selected = "".join(lines[start_line - 1 : end_line])
+    return start_line, end_line, total, selected
 
 
 # NOTE:安全扫描：检测写入内容中是否包含密钥泄露等敏感信息，若发现则打印警告
@@ -106,7 +139,7 @@ def register(agent):
         if not filepath.is_file():
             return f"错误: {filename} 不是一个文件"
         try:
-            content = filepath.read_text(encoding="utf-8")
+            content = _cached_read_text(filepath)
             ctx.deps.tool_tracker.add_chars(len(content))
             return content
         except Exception as e:
@@ -202,7 +235,7 @@ def register(agent):
         if not filepath.exists():
             return f"错误: 文件 {filename} 不存在"
         try:
-            content = filepath.read_text(encoding="utf-8")
+            content = _cached_read_text(filepath)
         except Exception as e:
             return f"错误: 读取文件失败 - {e}"
         count = content.count(old_string)
@@ -213,6 +246,7 @@ def register(agent):
         new_content = content.replace(old_string, new_string, 1)
         try:
             filepath.write_text(new_content, encoding="utf-8")
+            _invalidate_file_cache(filepath)
         except Exception as e:
             return f"错误: 写入文件失败 - {e}"
         ctx.deps.undo_manager.record("write", filename, old_content=content)
@@ -236,11 +270,12 @@ def register(agent):
         if not filepath.exists():
             return f"错误: 文件 {filename} 不存在，请使用 create_file 创建新文件"
         try:
-            old_content = filepath.read_text(encoding="utf-8")
+            old_content = _cached_read_text(filepath)
         except Exception as e:
             return f"错误: 读取文件失败 - {e}"
         try:
             filepath.write_text(content, encoding="utf-8")
+            _invalidate_file_cache(filepath)
         except Exception as e:
             return f"错误: 写入文件失败 - {e}"
         ctx.deps.undo_manager.record("overwrite", filename, old_content=old_content)
@@ -264,12 +299,13 @@ def register(agent):
         if not filepath.exists():
             return f"错误: 文件 {filename} 不存在"
         try:
-            old_content = filepath.read_text(encoding="utf-8")
+            old_content = _cached_read_text(filepath)
         except Exception as e:
             return f"错误: 读取文件失败 - {e}"
         try:
             with filepath.open("a", encoding="utf-8") as f:
                 f.write(content)
+            _invalidate_file_cache(filepath)
         except Exception as e:
             return f"错误: 追加文件失败 - {e}"
         ctx.deps.undo_manager.record("append", filename, old_content=old_content)
@@ -292,11 +328,12 @@ def register(agent):
         if not filepath.is_file():
             return f"错误: {filename} 不是一个文件"
         try:
-            old_content = filepath.read_text(encoding="utf-8")
+            old_content = _cached_read_text(filepath)
         except Exception as e:
             return f"错误: 读取文件失败 - {e}"
         try:
             filepath.unlink()
+            _invalidate_file_cache(filepath)
         except Exception as e:
             return f"错误: 删除文件失败 - {e}"
         ctx.deps.undo_manager.record("delete", filename, old_content=old_content)

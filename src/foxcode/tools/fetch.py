@@ -2,10 +2,15 @@ import re
 import html
 import ipaddress
 import socket
+import time
 from urllib.parse import urljoin, urlparse
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
 from . import log_tool, permission_validator
+
+# NOTE:URL 抓取结果短 TTL 缓存，减少同一对话内重复网络请求
+_FETCH_CACHE_TTL = 30.0
+_fetch_cache: dict[str, tuple[float, str]] = {}
 
 
 # NOTE:去除 HTML 标签、脚本/样式块与实体编码，仅保留可读文本
@@ -112,6 +117,14 @@ def register(agent):
         ctx: RunContext[WorkspaceDeps], url: str, max_length: int = 8000
     ) -> str:
         log_tool(ctx, "fetch_url", url)
+        now = time.monotonic()
+        entry = _fetch_cache.get(url)
+        if entry is not None and now - entry[0] < _FETCH_CACHE_TTL:
+            text = entry[1]
+            if len(text) > max_length:
+                text = text[:max_length] + "\n... (内容已截断，缓存)"
+            return text
+
         try:
             parsed = urlparse(url)
             if not parsed.scheme or not parsed.netloc:
@@ -165,6 +178,7 @@ def register(agent):
             else:
                 text = _clean_html(response.text)
 
+            _fetch_cache[url] = (now, text)
             if len(text) > max_length:
                 text = text[:max_length] + "\n... (内容已截断)"
             return text

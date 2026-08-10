@@ -1,7 +1,12 @@
+import time
 from pathlib import Path
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
 from . import log_tool, permission_validator
+
+# NOTE:目录树短 TTL 缓存，减少同一路径下连续 tree 调用的重复遍历
+_TREE_CACHE_TTL = 5.0
+_tree_cache: dict[str, tuple[float, str]] = {}
 
 
 # NOTE:递归构建 ASCII 目录树，支持深度限制、排除模式、隐藏文件开关
@@ -107,6 +112,11 @@ def register(agent):
 
         rel = search_path.relative_to(ctx.deps.workspace_dir)
         header = f"{rel or '.'}/"
+        cache_key = f"{search_path}:{max_depth}:{show_hidden}"
+        now = time.monotonic()
+        entry = _tree_cache.get(cache_key)
+        if entry is not None and now - entry[0] < _TREE_CACHE_TTL:
+            return entry[1]
         lines = _build_tree(
             search_path,
             ctx.deps.workspace_dir,
@@ -114,5 +124,8 @@ def register(agent):
             show_hidden=show_hidden,
         )
         if not lines:
-            return f"{header}\n(空目录)"
-        return f"{header}\n" + "\n".join(lines)
+            result = f"{header}\n(空目录)"
+        else:
+            result = f"{header}\n" + "\n".join(lines)
+        _tree_cache[cache_key] = (now, result)
+        return result

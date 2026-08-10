@@ -1,3 +1,10 @@
-- [x] 修改 cli.py 的 `_run_interactive`，添加 default_prompt 自动加载逻辑
-- [x] 运行测试验证无回归（23 passed，ruff + flake8 通过）
-- [x] 更新持久化文件（goal.md / plan.md / todo.md）
+- [ ] 创建 cli_ui.py（print_welcome, print_help, print_action_plan, _extract_thinking, _print_run_error）
+- [ ] 创建 cli_git.py（_generate_commit_message, _show_colored_diff, _track_goal_files）
+- [ ] 创建 cli_agent.py（RetryClient, _build_agent, _run_with_narration, _run_status_loop）
+- [ ] 创建 cli_commands.py（所有 /xxx 命令处理函数）
+- [ ] 创建 cli_session.py（session 管理, _run_goal_loop, _save_session）
+- [ ] 精简 cli.py 为入口文件
+- [ ] 运行 41 个测试验证无回归
+- [ ] Phase 2: 添加 LRU 缓存到文件读取热点
+- [ ] Phase 3: 完善类型注解
+- [ ] Phase 4: 新增单元测试

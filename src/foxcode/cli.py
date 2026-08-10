@@ -116,7 +116,6 @@ console = Console()
 # NOTE:带指数退避重试的 HTTP 客户端，自动处理 403/429/5xx 与网络抖动
 class RetryClient(httpx.AsyncClient):
     RETRY_STATUSES = frozenset({403, 429, 500, 502, 503, 504})
-    MAX_RETRIES = 5
 
     def __init__(self, *args, **kwargs):
         # 为长思考/流式场景优化：连接10s、读取5分钟、写入10s、pool 10s
@@ -135,6 +134,15 @@ class RetryClient(httpx.AsyncClient):
             ),
         )
         super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def _retry_wait(retry_count: int) -> int:
+        """无限重试等待间隔：第1次15s、第2次30s、第3次起60s。"""
+        if retry_count == 1:
+            return 15
+        if retry_count == 2:
+            return 30
+        return 60
 
     async def send(self, request, *args, **kwargs):
         retry_count = 0
@@ -155,14 +163,8 @@ class RetryClient(httpx.AsyncClient):
 
                 if response.status_code in self.RETRY_STATUSES:
                     retry_count += 1
-                    wait = min(15 * retry_count, 120)
+                    wait = self._retry_wait(retry_count)
                     await response.aread()
-                    if retry_count > self.MAX_RETRIES:
-                        raise httpx.HTTPStatusError(
-                            f"服务不可用 ({response.status_code})，已达最大重试次数",
-                            request=new_request,
-                            response=response,
-                        )
                     console.print(
                         f"  [yellow]服务暂不可用 ({response.status_code})，{wait}秒后重试 (第{retry_count}次)[/yellow]"
                     )
@@ -183,32 +185,21 @@ class RetryClient(httpx.AsyncClient):
 
                 return response
 
-            except httpx.TransportError as e:
+            except httpx.TransportError:
                 retry_count += 1
-                if retry_count > self.MAX_RETRIES:
-                    console.print(
-                        f"  [red]请求异常: {e}，已达最大重试次数 {self.MAX_RETRIES}[/red]"
-                    )
-                    raise
-                # 连接类抖动使用固定短间隔快速重试，避免长等待
-                wait = min(5 * retry_count, 30)
+                wait = self._retry_wait(retry_count)
                 console.print(
-                    f"  [yellow]请求异常: {e}，{wait}秒后重试 (第{retry_count}次)[/yellow]"
+                    f"  [yellow]网络异常，{wait}秒后重试 (第{retry_count}次)[/yellow]"
                 )
                 await asyncio.sleep(wait)
-            except httpx.ProtocolError as e:
+            except httpx.ProtocolError:
                 # ProtocolError（如 RemoteProtocolError / LocalProtocolError /
                 # incomplete chunked read）是 TransportError 子类，理论上已被
                 # 上面捕获；此处兜底防止因 httpx 版本差异导致漏网
                 retry_count += 1
-                if retry_count > self.MAX_RETRIES:
-                    console.print(
-                        f"  [red]协议异常: {e}，已达最大重试次数 {self.MAX_RETRIES}[/red]"
-                    )
-                    raise
-                wait = min(5 * retry_count, 30)
+                wait = self._retry_wait(retry_count)
                 console.print(
-                    f"  [yellow]协议异常: {e}，{wait}秒后重试 (第{retry_count}次)[/yellow]"
+                    f"  [yellow]网络异常，{wait}秒后重试 (第{retry_count}次)[/yellow]"
                 )
                 await asyncio.sleep(wait)
 
@@ -874,11 +865,7 @@ def _print_run_error(e: Exception) -> bool:
         )
         return True
     if isinstance(e, (httpx.RemoteProtocolError, httpx.LocalProtocolError)):
-        console.print(
-            f"[red]网络连接错误: 与 API 服务器的连接中断[/red]\n"
-            f"  [yellow]原因: {e}[/yellow]\n"
-            f"  [dim]提示: 请检查网络连接是否稳定，或 API 服务器是否正常运行[/dim]"
-        )
+        console.print("[red]网络连接错误: 与 API 服务器的连接中断[/red]")
         return True
     if isinstance(e, (httpx.HTTPStatusError, httpx.TransportError)):
         console.print(f"[red]API 请求错误: {e}[/red]")
@@ -1058,10 +1045,6 @@ async def _run_goal_loop(
             )
         except Exception as e:
             _print_run_error(e)
-            console.print(
-                "  [yellow]本轮目标执行因 API 错误中断，已保留当前进度，"
-                "可稍后再次执行 /goal 继续[/yellow]"
-            )
             return all_messages
 
         from .context_compressor import compress_messages

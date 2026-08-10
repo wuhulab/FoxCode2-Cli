@@ -1,9 +1,14 @@
 import re
 import html
+import time
 from urllib.parse import quote_plus
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
 from . import log_tool, permission_validator
+
+# NOTE:网络搜索结果短 TTL 缓存，减少同一 query 的重复请求
+_SEARCH_CACHE_TTL = 60.0
+_search_cache: dict[str, tuple[float, str]] = {}
 
 
 # NOTE:注册网页搜索工具：通过必应搜索抓取结果，解析标题/链接/摘要
@@ -18,6 +23,13 @@ def register(agent):
             num_results = 1
         if num_results > 15:
             num_results = 15
+
+        cache_key = f"{query}:{num_results}"
+        now = time.monotonic()
+        entry = _search_cache.get(cache_key)
+        if entry is not None and now - entry[0] < _SEARCH_CACHE_TTL:
+            return entry[1]
+
         try:
             url = (
                 f"https://www.bing.com/search?q={quote_plus(query)}&count={num_results}"
@@ -55,7 +67,10 @@ def register(agent):
                     )
 
             if results:
-                return "\n---\n".join(results)
-            return f"未找到关于 '{query}' 的搜索结果"
+                result_text = "\n---\n".join(results)
+            else:
+                result_text = f"未找到关于 '{query}' 的搜索结果"
+            _search_cache[cache_key] = (now, result_text)
+            return result_text
         except Exception as e:
             return f"搜索失败: {e}"

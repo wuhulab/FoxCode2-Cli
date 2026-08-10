@@ -9,12 +9,53 @@
 对其他语言，未来可扩展为调用真正的 LSP 进程。
 """
 
+import time
 from pathlib import Path
+from typing import Any
 
 from pydantic_ai import RunContext
 
 from ..models import WorkspaceDeps
 from . import log_tool, permission_validator
+
+# NOTE:缓存已读取的 Python 源码与 jedi.Script，减少反复 I/O 和重复解析
+_file_source_cache: dict[
+    str, tuple[float, int, str]
+] = {}  # path -> (mtime, size, source)
+_jedi_script_cache: dict[
+    str, tuple[float, int, Any]
+] = {}  # path -> (mtime, size, script)
+
+
+def _get_cached_script(filepath: Path):
+    """获取缓存的源码与 jedi.Script；若文件变更则重建缓存。返回 (source, script) 或 (None, None)。"""
+    key = str(filepath)
+    try:
+        st = filepath.stat()
+        mtime, size = st.st_mtime, st.st_size
+    except OSError:
+        return None, None
+
+    source_entry = _file_source_cache.get(key)
+    if source_entry and source_entry[0] == mtime and source_entry[1] == size:
+        source = source_entry[2]
+    else:
+        try:
+            source = filepath.read_text(encoding="utf-8").replace("\r\n", "\n")
+        except Exception:
+            return None, None
+        _file_source_cache[key] = (mtime, size, source)
+
+    script_entry = _jedi_script_cache.get(key)
+    if script_entry and script_entry[0] == mtime and script_entry[1] == size:
+        script = script_entry[2]
+    else:
+        import jedi
+
+        script = jedi.Script(source, path=str(filepath))
+        _jedi_script_cache[key] = (mtime, size, script)
+
+    return source, script
 
 
 # NOTE:将相对路径解析为安全路径，并校验必须是 .py 文件
@@ -120,13 +161,11 @@ def register(agent):
         if filepath is None:
             return f"错误: {filename} 不是有效的 Python 文件"
 
-        try:
-            source = filepath.read_text(encoding="utf-8").replace("\r\n", "\n")
-        except Exception as e:
-            return f"错误: 读取文件失败 - {e}"
+        source, script = _get_cached_script(filepath)
+        if source is None:
+            return "错误: 读取文件失败"
 
         pos = _rowcol_to_pos(source, row, col or 1)
-        script = jedi.Script(source, path=str(filepath))
         try:
             defs = script.goto(pos, follow_builtin_imports=True)
         except Exception as e:
@@ -159,13 +198,11 @@ def register(agent):
         if filepath is None:
             return f"错误: {filename} 不是有效的 Python 文件"
 
-        try:
-            source = filepath.read_text(encoding="utf-8").replace("\r\n", "\n")
-        except Exception as e:
-            return f"错误: 读取文件失败 - {e}"
+        source, script = _get_cached_script(filepath)
+        if source is None:
+            return "错误: 读取文件失败"
 
         pos = _rowcol_to_pos(source, row, col or 1)
-        script = jedi.Script(source, path=str(filepath))
         try:
             refs = script.get_references(pos)
         except Exception as e:
@@ -198,13 +235,11 @@ def register(agent):
         if filepath is None:
             return f"错误: {filename} 不是有效的 Python 文件"
 
-        try:
-            source = filepath.read_text(encoding="utf-8").replace("\r\n", "\n")
-        except Exception as e:
-            return f"错误: 读取文件失败 - {e}"
+        source, script = _get_cached_script(filepath)
+        if source is None:
+            return "错误: 读取文件失败"
 
         pos = _rowcol_to_pos(source, row, col or 1)
-        script = jedi.Script(source, path=str(filepath))
         sigs = script.get_signatures(pos)
         infers = script.infer(pos)
 
@@ -256,13 +291,11 @@ def register(agent):
         if filepath is None:
             return f"错误: {filename} 不是有效的 Python 文件"
 
-        try:
-            source = filepath.read_text(encoding="utf-8").replace("\r\n", "\n")
-        except Exception as e:
-            return f"错误: 读取文件失败 - {e}"
+        source, script = _get_cached_script(filepath)
+        if source is None:
+            return "错误: 读取文件失败"
 
         pos = _rowcol_to_pos(source, row, col or 1)
-        script = jedi.Script(source, path=str(filepath))
         defs = script.goto(pos, follow_builtin_imports=True)
         if not defs:
             return "未找到该符号的文档"

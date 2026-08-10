@@ -8,7 +8,12 @@ from pydantic_ai import RunContext
 
 from ..models import WorkspaceDeps
 from . import log_tool, permission_validator
-from .file_ops import _resolve_safe_path, check_protected_write
+from .file_ops import (
+    _resolve_safe_path,
+    check_protected_write,
+    _cached_read_text,
+    _invalidate_file_cache,
+)
 from .security import check_content_security, format_security_warnings
 
 
@@ -149,7 +154,7 @@ def register(agent):
                 return f"错误: 第 {i + 1} 个编辑的文件 {filename} 不存在"
 
             try:
-                content = filepath.read_text(encoding="utf-8")
+                content = _cached_read_text(filepath)
             except Exception as e:
                 return f"错误: 读取 {filename} 失败 - {e}"
 
@@ -205,6 +210,7 @@ def register(agent):
                     return f"错误: 编辑 {filename} 失败 - {msg}，已回滚之前所有编辑"
 
                 filepath.write_text(new_content, encoding="utf-8")
+                _invalidate_file_cache(filepath)
                 applied.append(
                     {
                         "filepath": filepath,
@@ -216,6 +222,7 @@ def register(agent):
         except Exception as e:
             for prev in applied:
                 prev["filepath"].write_text(prev["original_content"], encoding="utf-8")
+                _invalidate_file_cache(prev["filepath"])
             return f"错误: 写入异常 - {e}，已回滚所有编辑"
 
         # 记录撤销（组合操作）
@@ -284,13 +291,14 @@ def register(agent):
                 if not filepath.exists():
                     return f"错误: 目标文件 {filename} 不存在"
 
-                original = filepath.read_text(encoding="utf-8")
+                original = _cached_read_text(filepath)
                 new_content, ok, msg = _apply_patch(original, patch, fuzzy)
                 if not ok:
                     _rollback_diff(applied, ctx.deps.workspace_dir)
                     return f"错误: 应用 diff 到 {filename} 失败 - {msg}"
 
                 filepath.write_text(new_content, encoding="utf-8")
+                _invalidate_file_cache(filepath)
                 ctx.deps.undo_manager.record("write", filename, old_content=original)
                 applied.append(
                     {"filename": filename, "type": "write", "original": original}
@@ -469,7 +477,9 @@ def _rollback_diff(applied: list[dict], workspace_dir: Path):
             if item["type"] == "create":
                 if filepath.exists():
                     filepath.unlink()
+                    _invalidate_file_cache(filepath)
             elif item["type"] == "write" and item["original"] is not None:
                 filepath.write_text(item["original"], encoding="utf-8")
+                _invalidate_file_cache(filepath)
         except Exception:
             pass

@@ -3,6 +3,7 @@ from pathlib import Path
 from pydantic_ai import RunContext
 from ..models import WorkspaceDeps
 from . import log_tool, permission_validator, run_subprocess
+from .file_ops import _cached_read_text
 
 
 # NOTE:优先使用 ripgrep 进行项目中正则搜索，未安装时返回 None 触发 Python 回退
@@ -104,7 +105,7 @@ def _python_grep(
             if exts and not any(filepath.name.lower().endswith(e) for e in exts):
                 continue
             try:
-                text = filepath.read_text(encoding="utf-8", errors="replace")
+                text = _cached_read_text(filepath)
             except Exception:
                 continue
             for i, line in enumerate(text.splitlines(), 1):
