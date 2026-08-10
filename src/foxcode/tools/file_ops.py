@@ -14,7 +14,7 @@ from .security import check_content_security, format_security_warnings
 _workspace_norm_cache: dict[str, str] = {}
 
 # NOTE:文件读取短 TTL 缓存：基于 mtime+size 避免对同一文件的重复磁盘 I/O，写入后自动失效
-_FILE_READ_CACHE_TTL = 3.0  # seconds
+_FILE_READ_CACHE_TTL = 15.0  # seconds
 _file_read_cache: dict[
     str, tuple[float, float, int, str]
 ] = {}  # path -> (timestamp, mtime, size, content)

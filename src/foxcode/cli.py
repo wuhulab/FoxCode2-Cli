@@ -1039,6 +1039,10 @@ async def _run_goal_loop(
         work_prompt = (
             f"Complete the following goal:\n\n{goal}\n\n{GOAL_PERSIST_INSTRUCTION}"
         )
+        # 若会话历史已压缩，提示 AI 读取持久化上下文摘要
+        from .context_compressor import inject_context_hint
+
+        work_prompt = inject_context_hint(work_prompt, deps.workspace_dir, all_messages)
         try:
             all_messages, plan = await _run_status_loop(
                 agent, work_prompt, all_messages, deps, config
@@ -1066,7 +1070,7 @@ async def _run_goal_loop(
                 summary_text = ""
             if summary_text:
                 console.print(
-                    "  [dim]上下文已压缩，持久化文件 (goal.md/plan.md/todo.md) 将用于恢复进度[/dim]"
+                    f"  [dim]{summary_text} (持久化文件 goal.md/plan.md/todo.md 可用于恢复进度)[/dim]"
                 )
 
         console.print(
@@ -2012,6 +2016,13 @@ async def _run_interactive(config: dict, args):
                     # 解析图片引用
                     send_prompt = _parse_image_refs(send_prompt, workspace_dir)
 
+                    # 若会话历史已压缩，自动提示 AI 读取持久化上下文摘要
+                    from .context_compressor import inject_context_hint
+
+                    send_prompt = inject_context_hint(
+                        send_prompt, workspace_dir, all_messages
+                    )
+
                     all_messages, plan = await _run_status_loop(
                         agent, send_prompt, all_messages, deps, config
                     )
@@ -2029,7 +2040,7 @@ async def _run_interactive(config: dict, args):
                                 all_messages, http_client, config
                             )
                         if summary_text:
-                            console.print("  [dim]上下文已压缩，保留关键信息[/dim]")
+                            console.print(f"  [dim]{summary_text}[/dim]")
 
                     summary = deps.tool_tracker.summary_str()
                     if summary:

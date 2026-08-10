@@ -1,16 +1,26 @@
-"""智能上下文压缩：长对话自动摘要，保留关键信息减少 token 消耗。"""
+"""智能上下文压缩：长对话自动摘要，保留关键信息减少 token 消耗。
 
+核心缓存友好策略：
+- 保留 message_history 的前缀不变，以最大化 LLM API 的 prompt cache 命中率
+- 压缩产生的摘要不再插入 message_history（避免破坏前缀 stability）
+- 摘要写入 `.foxcode/.session_context.md`，新回合开始时通过 `inject_context_hint`
+  自动提示 AI 读取恢复
+"""
+
+import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
 
-
 # NOTE:上下文压缩策略参数：保留首尾消息数、触发阈值、摘要长度上限
-KEEP_FIRST_MESSAGES = 3  # 保留最开始的 N 条完整消息
-KEEP_LAST_MESSAGES = 15  # 保留最近的 N 条完整消息
-COMPRESS_THRESHOLD = 35  # 超过此数量时触发压缩
+# 增大 KEEP_FIRST_MESSAGES 以保护更长稳定前缀，提高 API prompt cache 命中率
+KEEP_FIRST_MESSAGES = 6  # 保留最开始的 N 条完整消息
+KEEP_LAST_MESSAGES = 10  # 保留最近的 N 条完整消息
+COMPRESS_THRESHOLD = 30  # 超过此数量时触发压缩（对应首尾保留总量）
 SUMMARY_MAX_TOKENS = 500
+CONTEXT_FILE_NAME = ".foxcode/.session_context.md"
 
 
 # NOTE:从 pydantic-ai 各类消息对象中提取可读的文本内容用于摘要
@@ -83,7 +93,25 @@ class TokenEstimator:
         return self._char_count // 4
 
 
-# NOTE:对长对话历史进行压缩：保留首尾消息，中间部分通过 API 生成摘要替换
+def _write_session_context(workspace_dir: Path, summary: str) -> bool:
+    """将摘要写入隐藏的会话上下文文件。"""
+    try:
+        ctx_path = workspace_dir / CONTEXT_FILE_NAME
+        ctx_path.parent.mkdir(parents=True, exist_ok=True)
+        ctx_path.write_text(
+            "# Session Context Summary\n\n"
+            "This file is auto-generated when the conversation history is compressed. "
+            "Read it at the start of a turn if you need to recall earlier decisions, "
+            "file changes, or user requirements that are no longer in the active message history.\n\n"
+            f"{summary}\n",
+            encoding="utf-8",
+        )
+        return True
+    except Exception:
+        return False
+
+
+# NOTE:对长对话历史进行压缩：保留首尾消息，中间部分生成摘要并持久化到文件
 async def compress_messages(
     messages: list[Any],
     http_client: httpx.AsyncClient,
@@ -92,7 +120,9 @@ async def compress_messages(
     """压缩消息历史。
 
     保留最前面的 KEEP_FIRST_MESSAGES 和最后面的 KEEP_LAST_MESSAGES 条完整消息，
-    对中间的消息生成摘要，替换为一条 summary 消息。
+    对中间的消息生成摘要，写入 `.foxcode/.session_context.md`。
+    **不再将摘要插入 message_history**，以保留下一条消息之前的所有前缀不变，
+    提高 LLM API 的 prompt cache 命中率。
 
     返回 (新消息列表, 摘要文本)。
     """
@@ -146,18 +176,62 @@ async def compress_messages(
         data = response.json()
         summary = data["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        # 摘要失败，回退到简单截断
+        # 摘要失败，回退到简单截断（不插入 summary，直接丢弃中间消息）
         return (
             first_chunk + last_chunk,
             f"上下文压缩失败 ({e})，已移除中间 {len(middle_chunk)} 条消息",
         )
 
-    # 构造 summary 消息——使用 pydantic-ai 的 ModelRequest 保证类型安全
-    from pydantic_ai.messages import ModelRequest, SystemPromptPart
+    # 将摘要写入文件，而不是插入 message_history
+    workspace_dir = Path(config.get("workspace_dir", "."))
+    wrote = _write_session_context(workspace_dir, summary)
 
-    summary_msg = ModelRequest(
-        parts=[SystemPromptPart(content=f"[上下文摘要] 之前对话的关键信息:\n{summary}")]
+    if wrote:
+        summary_text = (
+            f"中间 {len(middle_chunk)} 条消息已压缩，摘要保存至 {CONTEXT_FILE_NAME}"
+        )
+    else:
+        summary_text = f"中间 {len(middle_chunk)} 条消息已丢弃（摘要文件写入失败）"
+
+    # 新消息列表 = 前缀 + 后缀（前缀与之前有 N 条完全相同，利于 API cache）
+    new_messages = first_chunk + last_chunk
+    return new_messages, summary_text
+
+
+def inject_context_hint(
+    prompt: str, workspace_dir: Path, all_messages: list[Any]
+) -> str:
+    """若会话上下文摘要文件存在且消息列表已触发过压缩，在 prompt 前注入恢复提示。
+
+    这帮助 AI 在 message_history 被截断后仍能回顾之前的决策。
+    """
+    ctx_path = workspace_dir / CONTEXT_FILE_NAME
+    if not ctx_path.exists():
+        return prompt
+
+    # 只在 message_history 长度表明已丢弃过消息时才提示读取
+    # 使用一个略低于阈值的值，确保只要曾经压缩过就会触发
+    if len(all_messages) < COMPRESS_THRESHOLD:
+        return prompt
+
+    # 避免重复注入（如果 prompt 已经包含读取指令）
+    marker = f"Read `{CONTEXT_FILE_NAME}`"
+    if marker in prompt or CONTEXT_FILE_NAME in prompt:
+        return prompt
+
+    ctx_mtime = ctx_path.stat().st_mtime
+    # 如果上下文文件很旧（超过 30 分钟）且消息列表已清空，则不提示
+    import time
+
+    if (
+        time.time() - ctx_mtime > 1800
+        and len(all_messages) <= KEEP_FIRST_MESSAGES + KEEP_LAST_MESSAGES
+    ):
+        return prompt
+
+    return (
+        f"[Context Recovery] The conversation history has been compressed. "
+        f"Read `{CONTEXT_FILE_NAME}` first if you need to recall earlier decisions, "
+        f"then proceed with the user request.\n\n"
+        f"User request:\n{prompt}"
     )
-
-    new_messages = first_chunk + [summary_msg] + last_chunk
-    return new_messages, summary

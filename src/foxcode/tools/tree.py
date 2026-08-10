@@ -5,7 +5,7 @@ from ..models import WorkspaceDeps
 from . import log_tool, permission_validator
 
 # NOTE:目录树短 TTL 缓存，减少同一路径下连续 tree 调用的重复遍历
-_TREE_CACHE_TTL = 5.0
+_TREE_CACHE_TTL = 15.0
 _tree_cache: dict[str, tuple[float, str]] = {}
 
 
