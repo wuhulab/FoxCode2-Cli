@@ -434,6 +434,7 @@ class WorkspaceDeps:
     project_instructions: str = ""
     permissions: Any = None
     plan_mode: bool = False
+    cot_mode: bool = False
     skills: Any = None
     subagents: Any = None
     mcp_toolsets: Any = None
@@ -444,6 +445,7 @@ class WorkspaceDeps:
 WORKSPACE_DEPS_CHILD_OVERRIDES = {
     "project_instructions": "",
     "plan_mode": False,
+    "cot_mode": False,
     "skills": None,
     "subagents": None,
     "mcp_toolsets": None,

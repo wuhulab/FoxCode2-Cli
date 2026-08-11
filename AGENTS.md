@@ -111,6 +111,7 @@ def register(agent):
 - [x] 网络搜索与 URL 抓取
 - [x] 权限系统（allow/ask/deny）
 - [x] 计划模式
+- [x] CoT 思维链模式（`/cot`）- 注入 CoT 指令强制模型分步显式推理，思考块按编号步骤展示（Chain of Thought）
 - [x] 子代理（只读）
 - [x] Skills（支持单文件 skill 与目录型多文件 skill，内置 `novel-control-station`）
 - [x] MCP 支持

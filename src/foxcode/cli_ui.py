@@ -33,6 +33,7 @@ def print_welcome(version: str):
         "[yellow]/help[/yellow] 查看命令  "
         "[yellow]/goal[/yellow] 目标验收  "
         "[yellow]/plan[/yellow] 计划模式  "
+        "[yellow]/cot[/yellow] CoT思维链  "
         "[yellow]/solo[/yellow] 无人值守  "
         "[yellow]/permissions[/yellow] 权限设置  "
         "[yellow]/mcp[/yellow] MCP 服务  "
@@ -61,6 +62,7 @@ def print_help():
         "/goal <目标>", "设定目标，AI 完成后自动验收，未完成则继续直到确认达成"
     )
     table.add_row("/plan", "切换计划模式（只读探索，先出方案）")
+    table.add_row("/cot", "切换 CoT 思维链模式（强制分步显式推理并输出完整思维链）")
     table.add_row("/spec <需求>", "生成技术规格说明文档（SPEC.md），先出方案再编码")
     table.add_row("/solo", "切换无人值守模式（自动放行，只拦截高危命令）")
     table.add_row("/permissions", "查看当前权限模式与规则")
@@ -97,6 +99,22 @@ def _extract_thinking(text: str) -> tuple[str, str]:
     return thinking, cleaned
 
 
+# NOTE:将多个思考块格式化为编号的思维链，突出 CoT 分步推理的每一步
+def _format_thinking_chain(thinking: str) -> str:
+    """把思考块按空行拆分为步骤，输出编号的思维链便于追踪推理过程。"""
+    blocks = [b.strip() for b in thinking.split("\n\n") if b.strip()]
+    if len(blocks) <= 1:
+        return thinking
+    lines = []
+    for i, block in enumerate(blocks, 1):
+        if block.startswith(("-", "*", "1.", "1、")) and i == 1:
+            lines.append(block)
+            continue
+        rendered = "\n".join(f"  {line}" for line in block.splitlines())
+        lines.append(f"**步骤 {i}**\n{rendered}")
+    return "\n\n".join(lines)
+
+
 def print_action_plan(plan: "ActionPlan", skip_explanation: bool = False):
     """格式化并打印 AI 返回的 ActionPlan（思考过程、解释文本、修改文件、代码片段）。"""
     console.print()
@@ -104,8 +122,8 @@ def print_action_plan(plan: "ActionPlan", skip_explanation: bool = False):
         thinking, explanation = _extract_thinking(plan.explanation)
         if thinking:
             think_panel = Panel(
-                Markdown(thinking),
-                title="[dim]思考过程[/dim]",
+                Markdown(_format_thinking_chain(thinking)),
+                title="[dim]思考过程 · 思维链[/dim]",
                 border_style="grey50",
             )
             console.print(think_panel)

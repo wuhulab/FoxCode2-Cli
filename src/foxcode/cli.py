@@ -30,7 +30,7 @@ try:
 
     __version__ = _pkg_version("foxcode2")
 except Exception:
-    __version__ = "0.5.1"
+    __version__ = "0.5.2"
 from .permissions import PermissionManager
 from .tools import run_subprocess
 
@@ -39,6 +39,19 @@ if TYPE_CHECKING:
 
 # NOTE:旋转动画
 SPINNERS["fox"] = {"interval": 100, "frames": ["-", "/", "\\", "-"]}
+
+
+# NOTE:CoT（Chain of Thought）思维链模式指令块，注入提示词强制模型分步显式推理
+COT_INSTRUCTION = (
+    "[CoT Mode] Solve the task step by step. You MUST show your full chain of thought.\n"
+    "- First restate the goal and break it into a numbered list of sub-steps.\n"
+    "- Reason through each step inside <thinking>...</thinking> tags: explain what you plan to do, "
+    "which tool to use, why, and what you expect to find before calling it.\n"
+    "- After each tool result, briefly evaluate it inside a new <thinking>...</thinking> block before "
+    "deciding the next step. Correct course if the result contradicts your expectation.\n"
+    "- In the final ActionPlan, summarize the reasoning chain: list the sub-steps actually taken, the key "
+    "findings at each step, and how they lead to the final result.\n\n"
+)
 
 
 # NOTE:延迟导入 prompt_toolkit 构建增强输入会话，失败时回退到 input()
@@ -56,6 +69,7 @@ def _make_prompt_session(history_file: Path):
             ("/help", "显示帮助"),
             ("/goal ", "设定目标并自动验收循环"),
             ("/plan", "切换计划模式"),
+            ("/cot", "切换 CoT 思维链模式"),
             ("/solo", "切换无人值守模式"),
             ("/permissions", "查看权限设置"),
             ("/free", "切换到内置免费 API 并选择模型"),
@@ -460,6 +474,22 @@ def _extract_thinking(text: str) -> tuple[str, str]:
     return thinking, cleaned
 
 
+# NOTE:将多个思考块格式化为编号的思维链，突出 CoT 分步推理的每一步
+def _format_thinking_chain(thinking: str) -> str:
+    """把思考块按空行拆分为步骤，输出编号的思维链便于追踪推理过程。"""
+    blocks = [b.strip() for b in thinking.split("\n\n") if b.strip()]
+    if len(blocks) <= 1:
+        return thinking
+    lines = []
+    for i, block in enumerate(blocks, 1):
+        if block.startswith(("-", "*", "1.", "1、")) and i == 1:
+            lines.append(block)
+            continue
+        rendered = "\n".join(f"  {line}" for line in block.splitlines())
+        lines.append(f"**步骤 {i}**\n{rendered}")
+    return "\n\n".join(lines)
+
+
 # NOTE:格式化并打印 AI 返回的 ActionPlan（思考过程、解释文本、修改文件、代码片段）
 def print_action_plan(plan: ActionPlan, skip_explanation: bool = False):
     console.print()
@@ -467,8 +497,8 @@ def print_action_plan(plan: ActionPlan, skip_explanation: bool = False):
         thinking, explanation = _extract_thinking(plan.explanation)
         if thinking:
             think_panel = Panel(
-                Markdown(thinking),
-                title="[dim]思考过程[/dim]",
+                Markdown(_format_thinking_chain(thinking)),
+                title="[dim]思考过程 · 思维链[/dim]",
                 border_style="grey50",
             )
             console.print(think_panel)
@@ -1493,6 +1523,16 @@ async def _run_interactive(config: dict, args):
                             f"[yellow]计划模式 {'开启' if deps.plan_mode else '关闭'}[/yellow]"
                         )
                         continue
+                    elif cmd == "/cot":
+                        deps.cot_mode = not deps.cot_mode
+                        console.print(
+                            f"[yellow]CoT 思维链模式 {'开启' if deps.cot_mode else '关闭'}[/yellow]"
+                        )
+                        if deps.cot_mode:
+                            console.print(
+                                "  [dim]AI 将被强制按步骤显式推理，并输出完整的思维链 (Chain of Thought)[/dim]"
+                            )
+                        continue
                     elif cmd.startswith("/spec"):
                         parts = prompt.split(maxsplit=1)
                         spec_query = parts[1] if len(parts) > 1 else ""
@@ -2012,6 +2052,8 @@ async def _run_interactive(config: dict, args):
                             "After investigating, give a clear step-by-step implementation plan in the ActionPlan.\n\n"
                             + send_prompt
                         )
+                    if deps.cot_mode:
+                        send_prompt = COT_INSTRUCTION + send_prompt
 
                     # 解析图片引用
                     send_prompt = _parse_image_refs(send_prompt, workspace_dir)
