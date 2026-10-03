@@ -80,11 +80,13 @@ async def _run_goal_loop(
     把验收反馈作为后续指令交给主 AI 继续工作，循环直到验收通过或达到上限。
     """
     from .goal import create_goal_verifier, verify_goal
-    from .context_compressor import TokenEstimator, compress_messages
+    from .context_compressor import (
+        compress_messages,
+        context_token_budget,
+        estimate_message_tokens,
+    )
 
     verifier = create_goal_verifier(config, deps.http_client)
-    max_context_tokens = config.get("max_context_tokens", 100000)
-    token_estimator = TokenEstimator()
 
     for iteration in range(1, max_iterations + 1):
         console.print()
@@ -112,10 +114,11 @@ async def _run_goal_loop(
             _print_run_error(e)
             return all_messages
 
-        if (
-            len(all_messages) > 50
-            or token_estimator.estimate(all_messages) > max_context_tokens
-        ):
+        over_count = len(all_messages) > 50
+        over_tokens = estimate_message_tokens(all_messages) > context_token_budget(
+            config
+        )
+        if over_count or over_tokens:
             try:
                 with console.status("[dim]智能压缩上下文中...[/dim]", spinner="fox"):
                     all_messages, summary_text = await compress_messages(

@@ -325,6 +325,292 @@ def test_estimate_message_tokens():
     assert estimate_message_tokens(long) > estimate_message_tokens(short)
 
 
+def test_estimate_message_tokens_counts_full_tool_return():
+    """巨型工具返回必须完整计入估算，不能被截断成固定长度。"""
+    from pydantic_ai.messages import ModelRequest, ToolReturnPart, UserPromptPart
+
+    from foxcode.context_compressor import estimate_message_tokens
+
+    big = ModelRequest(
+        parts=[
+            UserPromptPart(content="读文件"),
+            ToolReturnPart(
+                tool_name="read_file", content="x" * 100_000, tool_call_id="c1"
+            ),
+        ]
+    )
+    est = estimate_message_tokens([big])
+    # 10 万字符（非中文）应估算为约 2.5 万 token，而不是几百
+    assert est > 20_000, f"工具返回被严重低估: {est}"
+
+
+def test_estimate_text_tokens_cjk_ratio():
+    """中文按 1 token/字估算，不应按 4 字符/token 低估。"""
+    from foxcode.context_compressor import estimate_text_tokens
+
+    zh = estimate_text_tokens("中文" * 500)  # 1000 个汉字
+    en = estimate_text_tokens("x" * 1000)  # 1000 个英文字符
+    assert zh >= 1000, f"中文估算偏低: {zh}"
+    assert en < zh, f"英文应明显低于中文: en={en}, zh={zh}"
+
+
+def test_context_token_budget_applies_safety_ratio():
+    """压缩预算应为 max_context_tokens × 安全水位。"""
+    from foxcode.context_compressor import CONTEXT_SAFETY_RATIO, context_token_budget
+
+    budget = context_token_budget({"max_context_tokens": 100_000})
+    assert budget == int(100_000 * CONTEXT_SAFETY_RATIO)
+    # 配置缺失/非法时应回退到默认值而不是崩溃
+    assert context_token_budget({}) > 0
+    assert context_token_budget({"max_context_tokens": "abc"}) > 0
+
+
+def test_is_context_overflow_error_detects_patterns():
+    """上下文超限错误（含 cause 链）应被识别，普通错误不应误判。"""
+    from foxcode.cli import _is_context_overflow_error
+
+    assert _is_context_overflow_error(
+        RuntimeError(
+            "The input exceeds the supported context size. Compact the conversation and retry."
+        )
+    )
+    assert _is_context_overflow_error(
+        RuntimeError("maximum context length is 8192 tokens")
+    )
+    inner = RuntimeError("context_length_exceeded")
+    outer = RuntimeError("request failed")
+    outer.__cause__ = inner
+    assert _is_context_overflow_error(outer), "应沿 cause 链识别超限错误"
+    assert not _is_context_overflow_error(RuntimeError("connection reset"))
+
+
+@pytest.mark.asyncio
+async def test_compress_hard_trims_oversized_history():
+    """消息数不多但含巨型工具返回时，压缩应硬裁剪到预算内。"""
+    import tempfile
+
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse,
+        TextPart,
+        ToolCallPart,
+        ToolReturnPart,
+        UserPromptPart,
+    )
+
+    from foxcode.context_compressor import (
+        compress_messages,
+        estimate_message_tokens,
+    )
+
+    class _NoSummaryClient:
+        async def post(self, *args, **kwargs):
+            raise AssertionError("消息数不多（无中间段）时不应调用摘要接口")
+
+    with tempfile.TemporaryDirectory() as td:
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="请读取大日志")]),
+            ModelResponse(
+                parts=[ToolCallPart(tool_name="read_file", args={}, tool_call_id="c1")]
+            ),
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(
+                        tool_name="read_file",
+                        content="x" * 400_000,
+                        tool_call_id="c1",
+                    )
+                ]
+            ),
+            ModelResponse(parts=[TextPart(content="已读取")]),
+        ]
+        config = {
+            "base_url": "https://example.invalid/v1",
+            "model": "test",
+            "api_key": "k",
+            "workspace_dir": Path(td),
+            "max_context_tokens": 5_000,
+        }
+        before = estimate_message_tokens(messages)
+        new_messages, note = await compress_messages(
+            messages, _NoSummaryClient(), config, force=True
+        )
+        after = estimate_message_tokens(new_messages)
+        assert after < before, f"硬裁剪未生效: {before} -> {after}"
+        assert after <= 5_000, f"硬裁剪后仍超预算: {after}"
+        assert note, "应返回压缩说明"
+        # 工具返回被截断但消息结构仍完整
+        assert new_messages, "不应把历史清空"
+
+
+@pytest.mark.asyncio
+async def test_compress_drops_middle_with_summary_and_fixes_boundaries():
+    """压缩应保留首尾、丢弃中间并写入摘要文件，同时清理孤立的工具调用/返回。"""
+    import tempfile
+
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse,
+        TextPart,
+        ToolCallPart,
+        ToolReturnPart,
+        UserPromptPart,
+    )
+
+    from foxcode.context_compressor import compress_messages
+
+    class _FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": {"content": "这里是摘要"}}]}
+
+    class _FakeClient:
+        async def post(self, *args, **kwargs):
+            return _FakeResponse()
+
+    def _kinds(msg):
+        return [getattr(p, "part_kind", "") for p in getattr(msg, "parts", [])]
+
+    with tempfile.TemporaryDirectory() as td:
+        messages = []
+        # idx0..4：稳定的首段（请求/响应交替）
+        for i in range(2):
+            messages.append(ModelRequest(parts=[UserPromptPart(content=f"q{i}")]))
+            messages.append(ModelResponse(parts=[TextPart(content=f"a{i}")]))
+        messages.append(ModelRequest(parts=[UserPromptPart(content="q2")]))
+        # idx5：首段末尾的工具调用（其返回落在被丢弃的中间段）
+        messages.append(
+            ModelResponse(
+                parts=[ToolCallPart(tool_name="read_file", args={}, tool_call_id="c9")]
+            )
+        )
+        # idx6..29：中间段 24 条（含 idx5 调用的返回）
+        messages.append(
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(
+                        tool_name="read_file", content="x", tool_call_id="c9"
+                    )
+                ]
+            )
+        )
+        for i in range(23):
+            messages.append(ModelRequest(parts=[UserPromptPart(content=f"m{i}")]))
+        # idx30：尾部开头是孤立的工具返回（其调用已在中间段被丢弃）
+        messages.append(
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(
+                        tool_name="read_file", content="y", tool_call_id="c8"
+                    )
+                ]
+            )
+        )
+        # idx31..39：尾部其余消息
+        for i in range(9):
+            messages.append(ModelResponse(parts=[TextPart(content=f"t{i}")]))
+        assert len(messages) == 40, len(messages)
+
+        config = {
+            "base_url": "https://example.invalid/v1",
+            "model": "test",
+            "api_key": "k",
+            "workspace_dir": Path(td),
+        }
+        new_messages, note = await compress_messages(messages, _FakeClient(), config)
+        # 中间 24 条被压缩：首尾各保留 5 / 9 条（孤立工具调用与返回被清理）
+        assert len(new_messages) == 14, f"期望 14 条，实际 {len(new_messages)}"
+        assert "摘要" in note
+        assert (Path(td) / ".foxcode" / ".session_context.md").exists(), (
+            "摘要应写入 .session_context.md"
+        )
+        # 首尾不能残留孤立的工具调用/返回（会被 API 拒绝）
+        all_kinds = [k for m in new_messages for k in _kinds(m)]
+        assert "tool-return" not in all_kinds, f"残留孤立工具返回: {all_kinds}"
+        assert "tool-call" not in all_kinds, f"残留孤立工具调用: {all_kinds}"
+
+
+@pytest.mark.asyncio
+async def test_run_status_loop_retries_after_context_overflow():
+    """API 报上下文超限时应强制压缩并重试一次，而不是直接失败。"""
+    import tempfile
+
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse,
+        TextPart,
+        ToolCallPart,
+        ToolReturnPart,
+        UserPromptPart,
+    )
+
+    import foxcode.cli as cli_mod
+    from foxcode.context_compressor import estimate_message_tokens
+    from foxcode.models import ActionPlan
+
+    with tempfile.TemporaryDirectory() as td:
+        deps = _make_deps(Path(td))
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="读大文件")]),
+            ModelResponse(
+                parts=[ToolCallPart(tool_name="read_file", args={}, tool_call_id="c1")]
+            ),
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(
+                        tool_name="read_file",
+                        content="x" * 400_000,
+                        tool_call_id="c1",
+                    )
+                ]
+            ),
+            ModelResponse(parts=[TextPart(content="已读取")]),
+        ]
+        config = {
+            **CONFIG,
+            "workspace_dir": Path(td),
+            "max_context_tokens": 5_000,
+        }
+
+        calls = {"n": 0}
+
+        async def fake_run(agent, prompt, all_msgs, deps_, config_, status=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError(
+                    "The input exceeds the supported context size. Compact the conversation and retry."
+                )
+            return all_msgs, ActionPlan(explanation="完成"), None
+
+        original = cli_mod._run_with_narration
+        cli_mod._run_with_narration = fake_run
+        try:
+            out_messages, plan = await cli_mod._run_status_loop(
+                None, "hi", messages, deps, config
+            )
+        finally:
+            cli_mod._run_with_narration = original
+
+        assert calls["n"] == 2, "超限后应重试一次"
+        assert plan.explanation == "完成"
+        assert estimate_message_tokens(out_messages) < estimate_message_tokens(
+            messages
+        ), "重试前应完成一次实质压缩"
+
+        # 非超限错误不应重试，应原样抛出
+        async def boom(agent, prompt, all_msgs, deps_, config_, status=None):
+            raise RuntimeError("connection reset")
+
+        cli_mod._run_with_narration = boom
+        try:
+            with pytest.raises(RuntimeError):
+                await cli_mod._run_status_loop(None, "hi", messages, deps, config)
+        finally:
+            cli_mod._run_with_narration = original
+
+
 def test_max_context_tokens_env():
     """MAX_CONTEXT_TOKENS 应能覆盖默认压缩阈值。"""
     import os

@@ -5,10 +5,15 @@
 - 压缩产生的摘要不再插入 message_history（避免破坏前缀 stability）
 - 摘要写入 `.foxcode/.session_context.md`，新回合开始时通过 `inject_context_hint`
   自动提示 AI 读取恢复
+
+超限保护策略：
+- token 估算完整统计工具返回与工具参数（不截断），避免巨型工具输出被严重低估
+- 压缩后若仍超预算（例如少量消息里夹着巨型工具返回），执行硬裁剪：
+  先按档位截断超长工具返回，再从最旧处丢弃消息，保证下一次请求不被 API 以
+  “input exceeds the supported context size” 拒绝
 """
 
-import os
-from dataclasses import dataclass
+import re
 from pathlib import Path
 from typing import Any
 
@@ -22,75 +27,102 @@ COMPRESS_THRESHOLD = 30  # 超过此数量时触发压缩（对应首尾保留�
 SUMMARY_MAX_TOKENS = 500
 CONTEXT_FILE_NAME = ".foxcode/.session_context.md"
 
+# NOTE:安全水位：估算 token 达到 max_context_tokens 的该比例即压缩，
+# 为模型响应与下一轮输入预留空间（避免刚好卡在上限时被 API 拒绝）
+CONTEXT_SAFETY_RATIO = 0.85
+# NOTE:硬裁剪时单个工具返回保留的最大字符数，按档位递减直到估算值落入预算
+TOOL_RETURN_PRUNE_CAPS = (2000, 500, 120)
+# NOTE:硬裁剪兜底：无论怎样都至少保留最后 N 条消息，保证最新上下文可用
+HARD_TRIM_MIN_MESSAGES = 2
 
-# NOTE:从 pydantic-ai 各类消息对象中提取可读的文本内容用于摘要
-def _extract_text(msg: Any) -> str:
-    """从 pydantic-ai 消息对象中提取文本内容。"""
+# NOTE:中日韩文字（含全角标点、假名、谚文）按 1 token/字估算，其余字符按 4 字符/token 估算
+_CJK_RE = re.compile(
+    r"[\u2e80-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]"
+)
+
+
+# NOTE:估算单段文本的 token 数（中日韩按字、其余按 4 字符/token）
+def estimate_text_tokens(text: str) -> int:
+    """估算文本 token 数。
+
+    中文语境下 1 个汉字约等于 1 个 token，直接按字符数 /4 会低估约 4 倍，
+    导致压缩阈值迟迟不触发，最终被 API 以“上下文超限”拒绝。
+    """
+    if not text:
+        return 0
+    cjk = sum(1 for _ in _CJK_RE.finditer(text))
+    others = len(text) - cjk
+    # ceil(others / 4)
+    return cjk + others // 4 + (1 if others % 4 else 0)
+
+
+# NOTE:从 pydantic-ai 各类消息对象中提取可读的文本内容用于摘要/估算
+def _extract_text(msg: Any, max_part_chars: int | None = None) -> str:
+    """从 pydantic-ai 消息对象中提取文本内容。
+
+    Args:
+        msg: pydantic-ai 消息对象（ModelRequest / ModelResponse / 兼容 dict）。
+        max_part_chars: 单个部分（工具返回、工具参数等）的字符上限；
+            None 表示完整保留 —— token 估算必须用 None，否则大体积工具输出会被
+            截断成固定长度，估算值严重偏低。
+    """
     role = "unknown"
     parts_text = []
+
+    def _cut(text: str) -> str:
+        if max_part_chars is not None and len(text) > max_part_chars:
+            return text[:max_part_chars] + "..."
+        return text
 
     if hasattr(msg, "kind"):
         role = "user" if msg.kind == "request" else "assistant"
         if hasattr(msg, "parts"):
             for part in msg.parts:
                 if hasattr(part, "content"):
-                    parts_text.append(str(part.content))
+                    parts_text.append(_cut(str(part.content)))
                 elif hasattr(part, "part_kind"):
                     # tool call / tool return
                     if part.part_kind == "tool-call":
-                        parts_text.append(f"[调用工具 {part.tool_name}: {part.args}]")
+                        parts_text.append(
+                            f"[调用工具 {part.tool_name}: {_cut(str(part.args))}]"
+                        )
                     elif part.part_kind == "tool-return":
-                        ret = str(part.content)[:200]
-                        parts_text.append(f"[工具 {part.tool_name} 返回: {ret}...]")
+                        parts_text.append(
+                            f"[工具 {part.tool_name} 返回: {_cut(str(part.content))}]"
+                        )
         elif hasattr(msg, "content"):
-            parts_text.append(str(msg.content))
+            parts_text.append(_cut(str(msg.content)))
     elif hasattr(msg, "role"):
         role = msg.role
         if hasattr(msg, "content"):
-            parts_text.append(str(msg.content))
+            parts_text.append(_cut(str(msg.content)))
     elif isinstance(msg, dict):
         role = msg.get("role", "unknown")
         content = msg.get("content", msg.get("data", ""))
-        parts_text.append(str(content))
+        parts_text.append(_cut(str(content)))
     else:
-        parts_text.append(str(msg))
+        parts_text.append(_cut(str(msg)))
 
     return f"[{role}]\n" + "\n".join(parts_text)
 
 
-# NOTE:按字符数/4 粗略估算消息列表的 token 数，用于判断是否超过上下文阈值
+# NOTE:估算消息列表的 token 数（完整统计工具返回与参数，不做截断）
 def estimate_message_tokens(messages: list[Any]) -> int:
-    """粗略估算消息列表的总 token 数（按字符数 /4 估算）。
+    """粗略估算消息列表的总 token 数。
 
-    用于判断是否超过 MAX_CONTEXT_TOKENS 阈值，从而强制触发压缩总结。
+    用于判断是否超过压缩预算，从而在请求前强制触发压缩/硬裁剪。
     """
-    total_chars = 0
-    for msg in messages:
-        total_chars += len(_extract_text(msg))
-    return total_chars // 4
+    return sum(estimate_text_tokens(_extract_text(msg)) for msg in messages)
 
 
-# NOTE:增量 token 估算器：仅对新追加消息做序列化，避免压缩后全量重算
-@dataclass
-class TokenEstimator:
-    """增量 token 估算器：只对新追加的消息做序列化，避免每轮全量重算。
-
-    当消息列表被压缩/缩短时自动重建基线。
-    """
-
-    _msg_count: int = 0
-    _char_count: int = 0
-
-    def estimate(self, messages: list[Any]) -> int:
-        start = self._msg_count
-        if len(messages) < start:
-            # 列表被压缩/替换，重建基线
-            start = 0
-            self._char_count = 0
-        for msg in messages[start:]:
-            self._char_count += len(_extract_text(msg))
-        self._msg_count = len(messages)
-        return self._char_count // 4
+# NOTE:计算压缩触发预算：配置上限 × 安全水位，为响应与下一轮输入预留空间
+def context_token_budget(config: dict) -> int:
+    """返回触发压缩的 token 预算（max_context_tokens × CONTEXT_SAFETY_RATIO）。"""
+    try:
+        limit = int(config.get("max_context_tokens", 100000) or 100000)
+    except (TypeError, ValueError):
+        limit = 100000
+    return max(int(limit * CONTEXT_SAFETY_RATIO), 1000)
 
 
 def _write_session_context(workspace_dir: Path, summary: str) -> bool:
@@ -111,40 +143,105 @@ def _write_session_context(workspace_dir: Path, summary: str) -> bool:
         return False
 
 
-# NOTE:对长对话历史进行压缩：保留首尾消息，中间部分生成摘要并持久化到文件
-async def compress_messages(
+def _part_kind(part: Any) -> str:
+    """安全获取消息部分类型（tool-call / tool-return / text ...）。"""
+    return getattr(part, "part_kind", "") or ""
+
+
+def _has_part_kind(msg: Any, kind: str) -> bool:
+    """判断消息是否包含指定类型的部分。"""
+    parts = getattr(msg, "parts", None)
+    if not parts:
+        return False
+    return any(_part_kind(p) == kind for p in parts)
+
+
+# NOTE:截断超长工具返回，避免单条巨型工具输出撑爆上下文
+def _truncate_tool_returns(messages: list[Any], keep_chars: int) -> list[Any]:
+    """将消息中超长的工具返回内容截断，返回新列表。
+
+    未发生截断的消息沿用原对象，尽量保持历史前缀稳定（利于 prompt cache）。
+    重建消息对象失败时保留原对象，避免破坏历史结构。
+    """
+    from dataclasses import replace
+
+    result: list[Any] = []
+    for msg in messages:
+        parts = getattr(msg, "parts", None)
+        if not parts:
+            result.append(msg)
+            continue
+        changed = False
+        new_parts = []
+        for part in parts:
+            if _part_kind(part) == "tool-return":
+                content = getattr(part, "content", "")
+                text = content if isinstance(content, str) else str(content)
+                if len(text) > keep_chars:
+                    try:
+                        new_parts.append(
+                            replace(
+                                part,
+                                content=text[:keep_chars]
+                                + f"\n...[已截断，原长 {len(text)} 字符]",
+                            )
+                        )
+                        changed = True
+                        continue
+                    except Exception:
+                        pass
+            new_parts.append(part)
+        if changed:
+            try:
+                result.append(replace(msg, parts=new_parts))
+                continue
+            except Exception:
+                pass
+        result.append(msg)
+    return result
+
+
+# NOTE:硬裁剪：截断超长工具返回 + 从最旧处丢弃消息，直到估算值落入预算
+def _hard_trim(messages: list[Any], budget: int) -> list[Any]:
+    """硬裁剪消息列表，保证估算 token 不超过预算。
+
+    步骤：先按档位截断超长工具返回；仍超预算时从最旧处逐条丢弃消息
+    （至少保留最后 HARD_TRIM_MIN_MESSAGES 条），并在丢弃后清理孤立的工具返回
+    （对应工具调用已被丢弃，孤立的工具返回会被 API 拒绝）。
+    """
+    result = list(messages)
+    if estimate_message_tokens(result) <= budget:
+        return result
+
+    for cap in TOOL_RETURN_PRUNE_CAPS:
+        result = _truncate_tool_returns(result, cap)
+        if estimate_message_tokens(result) <= budget:
+            return result
+
+    est = estimate_message_tokens(result)
+    while len(result) > HARD_TRIM_MIN_MESSAGES and est > budget:
+        est -= estimate_message_tokens([result[0]])  # 逐条扣减，避免重复全量估算
+        result.pop(0)
+        while len(result) > 1 and _has_part_kind(result[0], "tool-return"):
+            est -= estimate_message_tokens([result[0]])
+            result.pop(0)
+    return result
+
+
+# NOTE:对中间消息生成摘要，失败返回 None（由调用方按丢弃处理）
+async def _summarize(
     messages: list[Any],
     http_client: httpx.AsyncClient,
     config: dict,
-) -> tuple[list[Any], str]:
-    """压缩消息历史。
-
-    保留最前面的 KEEP_FIRST_MESSAGES 和最后面的 KEEP_LAST_MESSAGES 条完整消息，
-    对中间的消息生成摘要，写入 `.foxcode/.session_context.md`。
-    **不再将摘要插入 message_history**，以保留下一条消息之前的所有前缀不变，
-    提高 LLM API 的 prompt cache 命中率。
-
-    返回 (新消息列表, 摘要文本)。
-    """
-    if len(messages) <= COMPRESS_THRESHOLD:
-        return messages, ""
-
-    total = len(messages)
-    first_chunk = messages[:KEEP_FIRST_MESSAGES]
-    middle_chunk = messages[KEEP_FIRST_MESSAGES : total - KEEP_LAST_MESSAGES]
-    last_chunk = messages[total - KEEP_LAST_MESSAGES :]
-
-    if not middle_chunk:
-        return messages, ""
-
-    # 将中间的消息转为文本用于摘要
+) -> str | None:
+    """调用模型把中间消息压缩成摘要文本，异常时返回 None。"""
     lines = [
         "Below is the conversation history to be summarized. Use this summary to keep assisting the user:\n"
     ]
-    for i, msg in enumerate(middle_chunk, 1):
-        text = _extract_text(msg)
-        # 截断过长的工具返回
-        lines.append(f"--- message {i} ---\n{text[:800]}\n")
+    for i, msg in enumerate(messages, 1):
+        # 单部分限量 800 字符、单条消息总量再截到 2000 字符，控制摘要请求体积
+        text = _extract_text(msg, max_part_chars=800)[:2000]
+        lines.append(f"--- message {i} ---\n{text}\n")
 
     prompt_text = "\n".join(lines)
 
@@ -174,28 +271,86 @@ async def compress_messages(
         )
         response.raise_for_status()
         data = response.json()
-        summary = data["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        # 摘要失败，回退到简单截断（不插入 summary，直接丢弃中间消息）
-        return (
-            first_chunk + last_chunk,
-            f"上下文压缩失败 ({e})，已移除中间 {len(middle_chunk)} 条消息",
-        )
+        return (data["choices"][0]["message"]["content"] or "").strip() or None
+    except Exception:
+        return None
 
-    # 将摘要写入文件，而不是插入 message_history
-    workspace_dir = Path(config.get("workspace_dir", "."))
-    wrote = _write_session_context(workspace_dir, summary)
 
-    if wrote:
-        summary_text = (
-            f"中间 {len(middle_chunk)} 条消息已压缩，摘要保存至 {CONTEXT_FILE_NAME}"
-        )
+# NOTE:对长对话历史进行压缩：保留首尾消息，中间部分生成摘要并持久化到文件
+async def compress_messages(
+    messages: list[Any],
+    http_client: httpx.AsyncClient,
+    config: dict,
+    force: bool = False,
+    token_budget: int | None = None,
+) -> tuple[list[Any], str]:
+    """压缩消息历史，必要时硬裁剪，确保压缩结果不超过 token 预算。
+
+    常规路径：保留最前面的 KEEP_FIRST_MESSAGES 和最后面的 KEEP_LAST_MESSAGES 条完整消息，
+    对中间的消息生成摘要，写入 `.foxcode/.session_context.md`。
+    **不把摘要插入 message_history**，以保持前缀不变、提高 LLM API 的 prompt cache 命中率。
+
+    兜底路径：若压缩后仍超预算（例如少量消息中夹着巨型工具返回），调用 `_hard_trim`
+    截断超长工具返回并丢弃最旧消息，避免下一次请求被 API 以“上下文超限”拒绝。
+
+    Args:
+        force: True 时跳过“消息数不多就跳过”的默认判断，并把压缩目标收紧为
+            当前体积的一半，强制执行一次实质缩减（用于 API 已报上下文超限后的恢复重试）。
+        token_budget: 压缩目标 token 预算，默认取 `context_token_budget(config)`。
+
+    返回 (新消息列表, 摘要文本)。
+    """
+    budget = token_budget if token_budget is not None else context_token_budget(config)
+    est = estimate_message_tokens(messages)
+    if force:
+        # 强制压缩（API 已报超限）：把目标压到当前体积的一半，
+        # 即使本地估算未超预算也要产生实质缩减，让重试有机会成功
+        # （下限取 200 tokens，避免预算被压到 0 导致裁剪失控）
+        budget = min(budget, max(est // 2, 200))
+    if not force and len(messages) <= COMPRESS_THRESHOLD and est <= budget:
+        return messages, ""
+
+    total = len(messages)
+    first_chunk = list(messages[:KEEP_FIRST_MESSAGES])
+    last_start = max(total - KEEP_LAST_MESSAGES, KEEP_FIRST_MESSAGES)
+    last_chunk = list(messages[last_start:])
+    middle_chunk = list(messages[KEEP_FIRST_MESSAGES:last_start])
+
+    notes: list[str] = []
+
+    if middle_chunk:
+        summary = await _summarize(middle_chunk, http_client, config)
+        if summary is None:
+            notes.append(f"上下文摘要生成失败，已移除中间 {len(middle_chunk)} 条消息")
+        elif _write_session_context(Path(config.get("workspace_dir", ".")), summary):
+            notes.append(
+                f"中间 {len(middle_chunk)} 条消息已压缩，摘要保存至 {CONTEXT_FILE_NAME}"
+            )
+        else:
+            notes.append(f"中间 {len(middle_chunk)} 条消息已丢弃（摘要文件写入失败）")
+
+        # 边界修正：避免出现“工具调用已丢弃但保留了工具返回”的孤立消息（会被 API 拒绝）
+        while last_chunk and _has_part_kind(last_chunk[0], "tool-return"):
+            last_chunk.pop(0)
+        # 首段末尾若有工具调用，其返回可能落在被丢弃的中间段，同样需要截掉
+        while first_chunk and _has_part_kind(first_chunk[-1], "tool-call"):
+            first_chunk.pop()
+
+        # 新消息列表 = 前缀 + 后缀（前缀与之前有 N 条完全相同，利于 API cache）
+        new_messages = first_chunk + last_chunk
     else:
-        summary_text = f"中间 {len(middle_chunk)} 条消息已丢弃（摘要文件写入失败）"
+        # 消息数不多（无中间段可压缩），可能体积仍然很大：直接走体积裁剪
+        new_messages = list(messages)
 
-    # 新消息列表 = 前缀 + 后缀（前缀与之前有 N 条完全相同，利于 API cache）
-    new_messages = first_chunk + last_chunk
-    return new_messages, summary_text
+    if estimate_message_tokens(new_messages) > budget:
+        before = estimate_message_tokens(new_messages)
+        new_messages = _hard_trim(new_messages, budget)
+        notes.append(
+            f"压缩后仍超预算（约 {before} tokens），已硬裁剪至约 "
+            f"{estimate_message_tokens(new_messages)} tokens"
+        )
+
+    return new_messages, "；".join(notes)
 
 
 def inject_context_hint(

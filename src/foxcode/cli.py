@@ -841,6 +841,39 @@ async def _run_with_narration(
     return all_messages, plan, usage
 
 
+# NOTE:上下文超限类错误的识别关键字（不同网关/模型的报错文案不一致，统一按关键字匹配）
+_CONTEXT_OVERFLOW_PATTERNS = (
+    "exceeds the supported context size",
+    "context_length_exceeded",
+    "maximum context length",
+    "context length is",
+    "context length exceeded",
+    "input is too long",
+    "prompt is too long",
+    "reduce the length",
+    "too many tokens",
+    "超过最大上下文",
+    "上下文长度超过",
+)
+
+
+# NOTE:识别“上下文超出模型上限”类错误（沿异常 cause 链查找关键字）
+def _is_context_overflow_error(e: BaseException) -> bool:
+    """判断异常（含 __cause__/__context__ 链）是否为上下文超限错误。
+
+    这类错误可恢复：压缩历史后重试即可，不应直接以崩溃结束会话。
+    """
+    seen: set[int] = set()
+    current: BaseException | None = e
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        text = str(current).lower()
+        if any(p in text for p in _CONTEXT_OVERFLOW_PATTERNS):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
 # NOTE:分类打印 AI 运行时错误（API 格式错误、HTTP 错误、超时、连接中断等），可继续时返回 True
 # NOTE:区分各类 API/网络错误并给出友好提示，返回 True 表示会话可继续而非直接崩溃
 # NOTE:错误分类处理器：区分临时性 API 抖动与致命错误，尽量保持交互会话不中断
@@ -858,6 +891,14 @@ def _print_run_error(e: Exception) -> bool:
         UnexpectedModelBehavior,
     )
 
+    # 上下文超限：自动压缩/硬裁剪后仍失败，给出可操作的调整建议
+    if _is_context_overflow_error(e):
+        console.print("[red]上下文超出模型可处理上限，自动压缩后仍未能完成请求[/red]")
+        console.print(
+            "  [yellow]建议: 调小 .env 中的 MAX_CONTEXT_TOKENS 让压缩更早触发；"
+            "或用 /session save 保存会话后重启 foxcode 开新会话[/yellow]"
+        )
+        return True
     if isinstance(e, UnexpectedModelBehavior):
         console.print(f"[red]API 响应格式错误: {e}[/red]")
         if e.__cause__ is not None:
@@ -905,7 +946,7 @@ def _print_run_error(e: Exception) -> bool:
     return True
 
 
-# NOTE:包装单次 agent 运行的状态循环：启动 spinner 更新器、处理审批暂停、收集结果
+# NOTE:包装单次 agent 运行的状态循环：上下文预检、超限自动恢复、审批暂停处理、结果收集
 async def _run_status_loop(
     agent,
     prompt: str | Sequence[Any] | None,
@@ -913,12 +954,26 @@ async def _run_status_loop(
     deps: WorkspaceDeps,
     config: dict,
 ):
-    """在 console.status 内执行一次 agent 运行，处理审批暂停。
+    """在 console.status 内执行一次 agent 运行，处理审批暂停与上下文超限。
 
     底层模型请求强制走流式（避免长思考被中间代理截断），前台仍按非流式方式
     展示最终结果。遍历模型响应时直接输出 AI 在调用工具时附带的话，
     便于协作开发确认，同时避免前台流式输出与 console.status 交错导致显示问题。
+
+    上下文保护分两层：
+    1. 发送前预检：历史估算 token 超过预算时先压缩，避免请求被 API 直接拒绝；
+    2. 发送后兜底：API 返回“上下文超限”时强制压缩并重试，长会话不再因单次
+       请求超限而中断（重试会重新执行本轮提示，可能有少量工具重复执行）。
     """
+    from .context_compressor import (
+        compress_messages,
+        context_token_budget,
+        estimate_message_tokens,
+    )
+
+    # 超限后的强制压缩重试次数（首次失败后最多再试 2 次）
+    max_overflow_retries = 2
+
     with console.status("", spinner="fox") as status:
         deps.permissions.status = status
         deps.permissions.tool_tracker = deps.tool_tracker
@@ -938,9 +993,47 @@ async def _run_status_loop(
 
         update_task = asyncio.create_task(status_updater())
         try:
-            all_messages, plan, usage = await _run_with_narration(
-                agent, prompt, all_messages, deps, config, status=status
-            )
+            # 预检：历史已接近模型上限时先压缩，避免请求被 API 直接拒绝
+            budget = context_token_budget(config)
+            if all_messages and estimate_message_tokens(all_messages) > budget:
+                status.update("[dim]上下文接近上限，正在压缩...[/dim]")
+                try:
+                    all_messages, summary_text = await compress_messages(
+                        all_messages, deps.http_client, config
+                    )
+                except Exception as e:
+                    # 压缩失败不应阻塞本轮运行，交给 API 超限兜底逻辑处理
+                    _print_run_error(e)
+                    summary_text = ""
+                if summary_text:
+                    console.print(f"  [dim]{summary_text}[/dim]")
+                status.update("")
+
+            for attempt in range(max_overflow_retries + 1):
+                try:
+                    all_messages, plan, usage = await _run_with_narration(
+                        agent, prompt, all_messages, deps, config, status=status
+                    )
+                    break
+                except Exception as e:
+                    # 仅对“上下文超限”做强制压缩重试，其他错误原样抛出
+                    no_retry_left = attempt >= max_overflow_retries
+                    if no_retry_left or not _is_context_overflow_error(e):
+                        raise
+                    console.print(
+                        f"[yellow]上下文超出模型上限，正在强制压缩后重试 "
+                        f"({attempt + 1}/{max_overflow_retries})...[/yellow]"
+                    )
+                    status.update("[dim]上下文超出上限，正在强制压缩...[/dim]")
+                    before_tokens = estimate_message_tokens(all_messages)
+                    all_messages, summary_text = await compress_messages(
+                        all_messages, deps.http_client, config, force=True
+                    )
+                    console.print(f"  [dim]{summary_text or '上下文已压缩'}[/dim]")
+                    status.update("")
+                    # 压缩后体积没有下降说明已经无可裁剪，重试也不会成功，直接抛出
+                    if estimate_message_tokens(all_messages) >= before_tokens:
+                        raise
         finally:
             update_task.cancel()
             try:
@@ -1049,11 +1142,14 @@ async def _run_goal_loop(
     把验收反馈作为后续指令交给主 AI 继续工作，循环直到验收通过或达到上限。
     """
     from .goal import create_goal_verifier, verify_goal
-    from .context_compressor import TokenEstimator
+    from .context_compressor import (
+        compress_messages,
+        context_token_budget,
+        estimate_message_tokens,
+        inject_context_hint,
+    )
 
     verifier = create_goal_verifier(config, deps.http_client)
-    max_context_tokens = config.get("max_context_tokens", 100000)
-    token_estimator = TokenEstimator()
 
     for iteration in range(1, max_iterations + 1):
         console.print()
@@ -1070,8 +1166,6 @@ async def _run_goal_loop(
             f"Complete the following goal:\n\n{goal}\n\n{GOAL_PERSIST_INSTRUCTION}"
         )
         # 若会话历史已压缩，提示 AI 读取持久化上下文摘要
-        from .context_compressor import inject_context_hint
-
         work_prompt = inject_context_hint(work_prompt, deps.workspace_dir, all_messages)
         try:
             all_messages, plan = await _run_status_loop(
@@ -1081,12 +1175,11 @@ async def _run_goal_loop(
             _print_run_error(e)
             return all_messages
 
-        from .context_compressor import compress_messages
-
-        if (
-            len(all_messages) > 50
-            or token_estimator.estimate(all_messages) > max_context_tokens
-        ):
+        over_count = len(all_messages) > 50
+        over_tokens = estimate_message_tokens(all_messages) > context_token_budget(
+            config
+        )
+        if over_count or over_tokens:
             try:
                 with console.status("[dim]智能压缩上下文中...[/dim]", spinner="fox"):
                     all_messages, summary_text = await compress_messages(
@@ -1309,7 +1402,11 @@ async def _run_interactive(config: dict, args):
     from .models import WorkspaceDeps, UndoManager
     from .agent import create_agent
     from .session import SessionManager
-    from .context_compressor import TokenEstimator
+    from .context_compressor import (
+        compress_messages,
+        context_token_budget,
+        estimate_message_tokens,
+    )
 
     workspace_dir = config["workspace_dir"].resolve()
     workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -1385,8 +1482,6 @@ async def _run_interactive(config: dict, args):
 
         all_messages = []
         max_history_messages = 50
-        max_context_tokens = config.get("max_context_tokens", 100000)
-        token_estimator = TokenEstimator()
 
         terminal_mode = False
         terminal_cwd = workspace_dir
@@ -2069,12 +2164,12 @@ async def _run_interactive(config: dict, args):
                         agent, send_prompt, all_messages, deps, config
                     )
 
-                    from .context_compressor import compress_messages
-
-                    if (
-                        len(all_messages) > max_history_messages
-                        or token_estimator.estimate(all_messages) > max_context_tokens
-                    ):
+                    # 回合结束后按消息数/体积压缩历史（体积判断用完整估算，避免低估）
+                    over_count = len(all_messages) > max_history_messages
+                    over_tokens = estimate_message_tokens(
+                        all_messages
+                    ) > context_token_budget(config)
+                    if over_count or over_tokens:
                         with console.status(
                             "[dim]智能压缩上下文中...[/dim]", spinner="fox"
                         ):
